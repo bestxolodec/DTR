@@ -1,5 +1,4 @@
-source("./code/functions.R")
-
+source("./src/functions.R")
 # for accidental sourcing the whole R file
 Sys.sleep(10)
 
@@ -47,15 +46,6 @@ optimized <- GenSA(par = initial.params, fn = ObjectiveFunction, lower.params.th
 optimized[c("value",  "par", "counts")]
 plot(optimized$trace.mat[, "function.value"])
 plot(optimized$trace.mat[, "current.minimum"])
-PolicyFunLinearKernel(optimized$par, patient.covariates =  patient.covariates)
-ObjectiveFunction(optimized$par, patient.covariates, propensity.scores, offset,
-                  PolicyFunLinearKernel, lambda, reward.values, treatment.values)
-PolicyFunLinearKernel(initial.params, patient.covariates =  patient.covariates)
-ObjectiveFunction(initial.params, patient.covariates, propensity.scores, offset,
-                  PolicyFunLinearKernel, lambda, reward.values, treatment.values)
-
-PolicyFunLinearKernel(params, observations.with.metadata = patient.covariates)
-
 
 decision.values <- PolicyFunLinearKernel(optimized$par, patient.covariates =  patient.covariates)
 rewards.scaled.0.1 <- (reward.values - min(reward.values) ) / (max(reward.values) - min(reward.values)) 
@@ -111,15 +101,8 @@ ObjectiveFunction(initial.params,
       patient.covariates, propensity.scores, offset, PolicyFunGaussKernel,
       lambda, reward.values, treatment.values, hyperparams=list(gamma=gamma))
 
-# Empirical Value Function  -----------------------------------------------
 
-# NOT YET READY
-ValueFunction <- function(data, offset, propensity.scores, policy.function,
-                           observed.treatment.colname = "Therapeutic.dose.of.warfarin") {
-  loss.value <- 1 - (abs(data[, observed.treatment.colname]) - policy.function(data)) / offset
-  multiplier <- max(loss.value, 0)
-  return(mean(get.reward(data) / propensity.scores / offset  * multiplier))
-}
+
 
 # Split data on test and train  -------------------------------------------
 
@@ -155,7 +138,8 @@ value.function(data=train.data,
 
 
 
-cbind(reward.values, treatment.values, PolicyFunLinearKernel(initial.params, patient.covariates = patient.covariates))
+cbind(reward.values, treatment.values, 
+      PolicyFunLinearKernel(initial.params, patient.covariates = patient.covariates))
 
 
 

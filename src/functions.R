@@ -2,6 +2,7 @@ library(caret)
 library(GenSA)
 library(CBPS)
 library(reshape)
+library(quantreg)
 
 
 # Functions to work with data ---------------------------------------------
@@ -10,15 +11,15 @@ GetDataToWorkWith <- function(file.path, choosen.columns.names, columns.to.float
   # Read, clean, and prepare data to work with
   #
   # Args:
-  #   file.path: Path to csv file with data 
+  #   file.path: Path to csv file with data
   #   choosen.columns.names: Which columns whould be used as a subset of the data
   #   columns.to.float: List of colnames to convert from float representation with
   #                     ',' as a separator
   #
   # Returns:
-  #   The data frame with fully available observations 
+  #   The data frame with fully available observations
   if (missing(file.path)) {
-    file.path <- "~/yandexDisk/DIPLOMA/data/ipwc_data.csv"
+    file.path <- "./data/ipwc_data.csv"
   }
   if (missing(choosen.columns.names)) {
     choosen.columns.names <- c("PharmGKB.Subject.ID", "Age", "Height..cm.",
@@ -80,7 +81,7 @@ GetPropensityScores <- function(observations.with.metadata, balance.formula,
 # Reward function ---------------------------------------------------------
 
 GetReward <- function(observations.with.metadata, ideal.outcome.value = 2.5,
-                      observed.outcome.colname = "INR.on.Reported.Therapeutic.Dose.of.Warfarin", 
+                      observed.outcome.colname = "INR.on.Reported.Therapeutic.Dose.of.Warfarin",
                       eps=0.01) {
   # Get reward value for each object (row) in observations.with.metadata as minus
   # the absolute deviation of observed.outcome.colname from ideal.value
@@ -95,7 +96,7 @@ GetReward <- function(observations.with.metadata, ideal.outcome.value = 2.5,
   #   List of Reward values, with indexies being the row
   #   indexies of observations.with.metadata.
   value <- observations.with.metadata[, observed.outcome.colname]
-  tmp <-   - abs(value - ideal.outcome.value) 
+  tmp <-   - abs(value - ideal.outcome.value)
   return (tmp - min(tmp) + eps)
   # return  (- abs(value - ideal.outcome.value) + eps)
 }
@@ -143,35 +144,34 @@ PolicyFunGaussKernel <- function(params, patient.covariates,
 
 # Objective function ------------------------------------------------------
 
-ObjectiveFunction <- function(params, patient.covariates, propensity.scores,
-                              offset, policy.function, lambda, reward.values,
-                              treatment.values, hyperparams=list()) {
+ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
+                              reward, offset, policy.function, lambda,
+                              hyperparams=list()) {
   # Objective (risk) function for minimization problem. Includes regularization.
   #
   # Args:
   #   params: Model parameters for policy.function -- are being changed
   #           during minimization procedure.
-  #   patient.covariates: Obseravation data of patients.
-  #   propensity.scores: Correspond to observations in data.
+  #   treatment: Observed treatment values for patients.
+  #   covariates: Obseravation data of patients.
+  #   prop.scores: Correspond to observations in data.
+  #   reward: Precomputed reward values of treatment treatment.
+  #           The greater reward, the better.
   #   offset: Smallest value of difference between
   #           observational treatment value and the predicted one,
   #           which is interpeted as full "1" loss
   #   policy.function: Decision function of the form function(params, data, ...)
   #                    which returns treatment given covariates.
   #   lambda: Regularization parameter.
-  #   reward.values: Precomputed reward values of treatment.values treatment.
-  #                  The greater reward, the better.
-  #   treatment.values: Observed treatment values of patients.
   #   hyperparams:  list of hyperparameters for policy function
   #
   # Returns:
   #   Regularized risk function of DTR wich is specified with policy.function.
-  # browser()
-  prediction <- policy.function(params, patient.covariates, hyperparams)
-  multiplier <- pmin(abs(treatment.values - prediction) / offset, 1)
-  risk.function.value <- mean(reward.values / propensity.scores / (2 * offset) * multiplier)
-  # tail is because we dont normilize intercept parameter
-  regularization.value <- lambda * norm(as.matrix(tail(params, -1)), type="F") ** 2
+  prediction <- policy.function(params, covariates, hyperparams)
+  multiplier <- pmin(abs(treatment - prediction) / offset, 1)
+  risk.function.value <- mean(reward / prop.scores / (2 * offset) * multiplier)
+  # tail is because we dont penalize intercept parameter
+  regularization.value <- lambda * sum(tail(params, -1)**2)
   return(risk.function.value + regularization.value)
 }
 
@@ -181,26 +181,26 @@ ObjectiveFunction <- function(params, patient.covariates, propensity.scores,
 # Optimization with DC functions ------------------------------------------
 
 
-DifferenceConvexOptimize <- function(initial.params, patient.covariates,
+DifferenceConvexOptimize <- function(params, covariates,
                                      propensity.scores, offset,
-                                     policy.function, lambda, reward.values,
-                                     treatment.values, hyperparams=list(),
+                                     policy.function, lambda, reward,
+                                     treatment, hyperparams=list(),
                                      next.gen.obj.fun, tolerance = 0.01) {
-  data.with.target <- cbind(treatment.values, patient.covariates)
+  data.with.target <- cbind(treatment, covariates)
   t.params <- initial.params
   # simply for first loop iteration
   t.next.params <- t.params
   while(sum((t.next.params-t.params)^2) > tolerance) {
     t.params <- t.next.params
-    t.prediction <- policy.function(t.params, patient.covariates, hyperparams)
-    t.abs.deviance.from.treatment  <- abs(treatment.values - t.prediction)
+    t.prediction <- policy.function(t.params, covariates, hyperparams)
+    t.abs.deviance.from.treatment  <- abs(treatment - t.prediction)
     t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
-    t.weights  <- reward.values * t.Q.values / offset**2
+    t.weights  <- reward * t.Q.values / offset**2
     # TODO: think of how to use rq.fit.lasso() here
-    # -1 as an intercept term is already present ind data matirx
-    t.next.model <-  rq(treatment.values ~ . , tau=.5, 
-                        data = as.data.frame(data.with.target), 
-                        weights = t.weights,  method="lasso")
+    # -1 as an intercept term is already present in data matirx
+    t.next.model <- rq(treatment ~ . , tau=.5,
+                       data = as.data.frame(data.with.target),
+                       weights = t.weights,  method="lasso")
   }
 }
 
@@ -210,6 +210,18 @@ DifferenceConvexOptimize <- function(initial.params, patient.covariates,
 # Experiment linear model  ------------------------------------------------
 
 OLSCostFunction <- function(params, patient.covariates) {
-  
+
 }
+
+
+# Empirical Value Function  -----------------------------------------------
+
+ValueFunction <- function(covariates, offset, prop.scores, policy.function,
+                          treatment) {
+  loss.value <- 1 - (abs(treatment - policy.function(data)) / offset
+  multiplier <- max(loss.value, 0)
+  return(mean(get.reward(data) / propensity.scores / offset  * multiplier))
+}
+
+
 
