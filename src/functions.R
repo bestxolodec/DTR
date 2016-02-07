@@ -205,23 +205,10 @@ DifferenceConvexOptimize <- function(params, covariates,
 }
 
 
-
-
-# Experiment linear model  ------------------------------------------------
-
-OLSCostFunction <- function(params, patient.covariates) {
-
-}
-
-
 # Empirical Value Function  -----------------------------------------------
 
-ValueFunction <- function(covariates, offset, prop.scores, policy.function,
-                          treatment) {
-  loss.value <- 1 - (abs(treatment - policy.function(data)) / offset
-  multiplier <- max(loss.value, 0)
-  return(mean(get.reward(data) / propensity.scores / offset  * multiplier))
+ValueFunction <- function(params, treatment, covariates, prop.scores, reward, offset,
+                          policy.function) {
+  loss <- max(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
+  return(mean(reward * loss / prop.scores / offset))
 }
-
-
-
