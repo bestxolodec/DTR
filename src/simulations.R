@@ -1,4 +1,5 @@
 library(doParallel)
+library(caret)
 source("./src/functions.R")
 # for accidental sourcisource("./src/functions.R")
 Sys.sleep(10)
@@ -53,6 +54,31 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
               prop.scores=prop.scores))
 }
 
+GetMeanDtrValueOnFolds <- function(folds, treatment, covariates, prop.scores,
+     reward, offset, control.offset, policy.function, lambda, obj.func) {
+  dtrs <- numeric(length = 0)
+  for (control.fold in folds) {
+    tune.covariates  <-  covariates [-control.fold, ]
+    tune.treatment   <-  treatment  [-control.fold, ]
+    tune.reward      <-  reward     [-control.fold, ]
+    tune.prop.scores <-  prop.scores[-control.fold, ]
+    opt.result <- OptimizeParamsOfPolicyFunction(treatment = tune.treatment,
+        covariates = tune.covariates, prop.scores = tune.prop.scores,
+        reward = tune.reward, offset = offset,
+        policy.function = PolicyFunLinearKernel, lambda = lambda,
+        obj.func = ObjectiveFunction, regress.init.params=T)
+    control.covariates  <-  covariates [control.fold, ]
+    control.treatment   <-  treatment  [control.fold, ]
+    control.reward      <-  reward     [control.fold, ]
+    control.prop.scores <-  prop.scores[control.fold, ]
+    dtr.value <- ValueFunction(opt.result$par, control.treatment, control.covariates,
+        control.prop.scores,  control.reward, control.offset, PolicyFunLinearKernel)
+    dtrs <- c(dtrs, dtr.value)
+    cat("DTRs: ", dtrs)
+  }
+  return(mean(dtrs))
+}
+
 
 
 
@@ -74,9 +100,10 @@ OptimizeParamsOfPolicyFunction <- function(treatment, covariates,
   }
   optimized <- GenSA(par = initial.params, fn = obj.func,
       lower.params.threshold, upper.params.threshold,
-      control=list(smooth=T, verbose=TRUE, maxit=6000, temperature = 6230),
+      control=list(smooth=T, verbose=TRUE, maxit=6000, temperature = 6200),
       # additional arguments which goes directly to ObjectiveFunction
       treatment, covariates, prop.scores, reward, offset, policy.function, lambda)
+  return(optimized)
 }
 
 
@@ -88,8 +115,8 @@ registerDoParallel(cores = 4)
 train.data.sample.sizes <- c(50, 100, 200, 400, 800)
 test.data.sample.size <- 10000
 number.of.covariates = 30
-sample.size <-  50
-offsets = seq(0.01, 1, length = 5)
+sample.size <-  100
+offsets = seq(0.01, 1, length = 10)
 control.offset = min(offsets) / 2 
 lambdas = seq(1, 10,  length=5) * 0.01
 
@@ -116,20 +143,20 @@ global.result <- list()
 for (offset in  offsets) {
   print(paste("Optimization offset: ", offset))
   result <- foreach (lambda = lambdas) %dopar% {
-    opt.result <- OptimizeParamsOfPolicyFunction(treatment = train.treatment,
-        covariates = train.covariates, prop.scores = train.prop.scores,
-        reward = train.reward, offset = offset,
-        policy.function = PolicyFunLinearKernel, lambda = lambda,
-        obj.func = ObjectiveFunction, regress.init.params=T)
-    dtr.value <- ValueFunction(opt.result$par, train.treatment, train.covariates,
-        train.prop.scores,  train.reward, control.offset, PolicyFunLinearKernel)
-# opt.result = list(par= c(1,2,3,4))
-# dtr.value = 123
-    return (list("offset"=offset, "lambda"=lambda, "value.function"=dtr.value,
-                 "params"=opt.result$par))
+    folds <- createFolds(train.treatment)
+    mean.dtr.value <- GetMeanDtrValueOnFolds(folds, train.treatment, 
+        train.covariates, train.prop.scores, train.reward, offset, 
+        control.offset, PolicyFunLinearKernel, lambda, obj.func)
+    return (list("offset"=offset, "lambda"=lambda,
+                 "value.function"=mean.dtr.value))
   }
   global.result <- c(global.result, result)
 }
+
+
+# dtr.value.on.test <- ValueFunction(opt.result$par, test.treatment, 
+#     test.covariates, test.prop.scores,  test.reward, 
+#     control.offset, PolicyFunLinearKernel)
 
 
 global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
@@ -140,22 +167,21 @@ result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
 result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
 ggplot(result.to.plot, aes(x = offset, y = value.function, colour = lambda)) + geom_line()
 
-
-pars = global.result.df$params[17][[1]]
-decision.values <- PolicyFunLinearKernel(pars, train.covariates)
-rewards.scaled.0.1 <- (train.reward - min(train.reward) ) / (max(train.reward) - min(train.reward))
-plot(decision.values, train.treatment,
+pars = global.result.df[ which.max(global.result.df$value.function),  ]
+best.offset = unlist(pars$offset)
+best.lambda = unlist(pars$lambda)
+opt.result <- OptimizeParamsOfPolicyFunction(train.treatment,
+    train.covariates, train.prop.scores, train.reward, best.offset,
+    PolicyFunLinearKernel, best.lambda, ObjectiveFunction)
+dtr.value.on.test <- ValueFunction(opt.result$par, test.treatment, 
+    test.covariates,  test.prop.scores,  test.reward, 
+    best.offset, PolicyFunLinearKernel)
+decision.values <- PolicyFunLinearKernel(opt.result$par, test.covariates)
+rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
+plot(decision.values, test.treatment,
      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-     pch=19)
+     pch=20)
 abline(0, 1)
 
-
-
-
-
-library(ggplot2)
-library(reshape)
-data <- data.frame(time = seq(0, 23), noob = rnorm(24), plus = runif(24),
-                   extra = rpois(24, lambda = 1))
-Molten <- melt(data, id.vars = "time")
-ggplot(Molten, aes(x = time, y = value, colour = variable)) + geom_line()
+plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.5))
+lines(density(test.treatment), col="blue", lwd=4)

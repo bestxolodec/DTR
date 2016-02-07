@@ -95,9 +95,9 @@ GetReward <- function(observations.with.metadata, ideal.outcome.value = 2.5,
   # Returns:
   #   List of Reward values, with indexies being the row
   #   indexies of observations.with.metadata.
-  value <- observations.with.metadata[, observed.outcome.colname]
-  tmp <-   - abs(value - ideal.outcome.value)
-  return (tmp - min(tmp) + eps)
+  observed.outcome <- observations.with.metadata[, observed.outcome.colname]
+  minus.abs.outcome.deviance <-  - abs(observed.outcome - ideal.outcome.value)
+  return (minus.abs.outcome.deviance - min(minus.abs.outcome.deviance) + eps)
   # return  (- abs(value - ideal.outcome.value) + eps)
 }
 
@@ -171,7 +171,7 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
   multiplier <- pmin(abs(treatment - prediction) / offset, 1)
   risk.function.value <- mean(reward / prop.scores / (2 * offset) * multiplier)
   # tail is because we dont penalize intercept parameter
-  regularization.value <- lambda * sum(tail(params, -1)**2)
+  regularization.value <- lambda * sum(tail(params, -1) ** 2)
   return(risk.function.value + regularization.value)
 }
 
@@ -190,12 +190,12 @@ DifferenceConvexOptimize <- function(params, covariates,
   t.params <- initial.params
   # simply for first loop iteration
   t.next.params <- t.params
-  while(sum((t.next.params-t.params)^2) > tolerance) {
+  while(sum((t.next.params-t.params) ** 2) > tolerance) {
     t.params <- t.next.params
     t.prediction <- policy.function(t.params, covariates, hyperparams)
     t.abs.deviance.from.treatment  <- abs(treatment - t.prediction)
     t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
-    t.weights  <- reward * t.Q.values / offset**2
+    t.weights  <- reward * t.Q.values / offset ** 2
     # TODO: think of how to use rq.fit.lasso() here
     # -1 as an intercept term is already present in data matirx
     t.next.model <- rq(treatment ~ . , tau=.5,
@@ -209,6 +209,6 @@ DifferenceConvexOptimize <- function(params, covariates,
 
 ValueFunction <- function(params, treatment, covariates, prop.scores, reward, offset,
                           policy.function) {
-  loss <- max(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
+  loss <- pmax(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
   return(mean(reward * loss / prop.scores / offset))
 }
