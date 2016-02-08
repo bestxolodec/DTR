@@ -183,18 +183,17 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
 
 DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
     propensity.scores, reward, offset, policy.function, lambda, 
-     hyperparams=list(), tolerance = 0.00001) {
-  # browser()
+    hyperparams=list(), tolerance = 0.00001) {
   stopifnot(is.matrix(covariates))
-  if (is.null(params)) {
-    params <- runif(ncol(covariates), min=-1, max=1)
-  }
   data.with.target <- c(data.frame(treatment), as.data.frame(covariates))
-  t.params <- params
-  # simply for first loop iteration
-  t.next.params <- t.params
+  if (is.null(params)) {
+    t.params <- runif(ncol(covariates), min=-1, max=1)  # default params
+  } else {
+    t.params <- params
+  }
+  t.next.params <- t.params  # simply for first loop iteration
   iteration <- 0
-  repeat{
+  repeat {
     cat("Iteration", iteration, "\n")
     t.params <- t.next.params
     t.prediction <- policy.function(t.params, covariates, hyperparams)
@@ -206,7 +205,7 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
     t.next.model <- rq(treatment ~ . - 1, tau=.5,
                        data = as.data.frame(data.with.target),
                        weights = t.weights,  method="lasso")
-    t.next.params <-  t.next.model$coefficients
+    t.next.params <-  t.next.model$coefficient
     if(sum((t.next.params - t.params) ** 2) < tolerance){
       break
     }
@@ -216,22 +215,15 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
 }
 
 
-s <-   DifferenceConvexOptimize(params=NULL, train.treatment, train.covariates, 
-    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda, 
-     hyperparams=list())
-
-opt.with.sa <-  OptimizeParamsOfPolicyFunction(train.treatment, train.covariates, 
-    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda, ObjectiveFunction)
-opt.with.sa$par  
-s
-ValueFunction(params=opt.with.sa$par, train.treatment, train.covariates, 
-    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel)
-ValueFunction(params=s, train.treatment, train.covariates, 
-    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel)
-ValueFunction(params=opt.with.sa$par, test.treatment, test.covariates, 
-    test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
-ValueFunction(params=s, test.treatment, test.covariates, 
-    test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
+# s <- DifferenceConvexOptimize(params=NULL, train.treatment, train.covariates,
+#      train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda)
+# opt.with.sa <-  OptimizeParamsOfPolicyFunction(train.treatment, train.covariates,
+#     train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda,
+#     ObjectiveFunction)
+# ValueFunction(params=opt.with.sa$par, test.treatment, test.covariates,
+#     test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
+# ValueFunction(params=s, test.treatment, test.covariates,
+#     test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
 
 
 # Empirical Value Function  -----------------------------------------------

@@ -3,8 +3,6 @@ source("./src/functions.R")
 Sys.sleep(10)
 
 
-
-
 # Prepare Data ------------------------------------------------------------
 
 data <- GetDataToWorkWith()
@@ -27,6 +25,7 @@ number.of.params <- ncol(patient.covariates)
 
 
 # Optimization of linear model --------------------------------------------
+
 lower.params.threshold <- rep(-1000, number.of.params)
 upper.params.threshold <- rep(1000, number.of.params)
 offset <- 2
