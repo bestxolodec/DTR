@@ -166,7 +166,7 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
   #   hyperparams:  list of hyperparameters for policy function
   #
   # Returns:
-  #   Regularized risk function of DTR wich is specified with policy.function.
+  #   Regularized risk function of DTR specified with policy.function.
   prediction <- policy.function(params, covariates, hyperparams)
   multiplier <- pmin(abs(treatment - prediction) / offset, 1)
   risk.function.value <- mean(reward / prop.scores / (2 * offset) * multiplier)
@@ -181,16 +181,21 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
 # Optimization with DC functions ------------------------------------------
 
 
-DifferenceConvexOptimize <- function(params, covariates,
-                                     propensity.scores, offset,
-                                     policy.function, lambda, reward,
-                                     treatment, hyperparams=list(),
-                                     next.gen.obj.fun, tolerance = 0.01) {
-  data.with.target <- cbind(treatment, covariates)
-  t.params <- initial.params
+DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
+    propensity.scores, reward, offset, policy.function, lambda, 
+     hyperparams=list(), tolerance = 0.00001) {
+  # browser()
+  stopifnot(is.matrix(covariates))
+  if (is.null(params)) {
+    params <- runif(ncol(covariates), min=-1, max=1)
+  }
+  data.with.target <- c(data.frame(treatment), as.data.frame(covariates))
+  t.params <- params
   # simply for first loop iteration
   t.next.params <- t.params
-  while(sum((t.next.params-t.params) ** 2) > tolerance) {
+  iteration <- 0
+  repeat{
+    cat("Iteration", iteration, "\n")
     t.params <- t.next.params
     t.prediction <- policy.function(t.params, covariates, hyperparams)
     t.abs.deviance.from.treatment  <- abs(treatment - t.prediction)
@@ -198,11 +203,35 @@ DifferenceConvexOptimize <- function(params, covariates,
     t.weights  <- reward * t.Q.values / offset ** 2
     # TODO: think of how to use rq.fit.lasso() here
     # -1 as an intercept term is already present in data matirx
-    t.next.model <- rq(treatment ~ . , tau=.5,
+    t.next.model <- rq(treatment ~ . - 1, tau=.5,
                        data = as.data.frame(data.with.target),
                        weights = t.weights,  method="lasso")
+    t.next.params <-  t.next.model$coefficients
+    if(sum((t.next.params - t.params) ** 2) < tolerance){
+      break
+    }
+    iteration = iteration + 1
   }
+  return(t.next.params)
 }
+
+
+s <-   DifferenceConvexOptimize(params=NULL, train.treatment, train.covariates, 
+    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda, 
+     hyperparams=list())
+
+opt.with.sa <-  OptimizeParamsOfPolicyFunction(train.treatment, train.covariates, 
+    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda, ObjectiveFunction)
+opt.with.sa$par  
+s
+ValueFunction(params=opt.with.sa$par, train.treatment, train.covariates, 
+    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel)
+ValueFunction(params=s, train.treatment, train.covariates, 
+    train.prop.scores,  train.reward, offset, PolicyFunLinearKernel)
+ValueFunction(params=opt.with.sa$par, test.treatment, test.covariates, 
+    test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
+ValueFunction(params=s, test.treatment, test.covariates, 
+    test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
 
 
 # Empirical Value Function  -----------------------------------------------
