@@ -240,7 +240,14 @@ for (offset in  offsets) {
 
 global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
 colnames(global.result.df)  <- names(global.result[[1]])
+result.to.plot <- global.result.df[, names(global.result.df) %in%
+                                     c("offset", "lambda", 
+                                       "value.function.dca",
+                                       "value.function.gen.sa")]
+result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
+result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
 
+par(mfrow=c(2,2))
 
 # DCA plotting ------------------------------------------------------------
 
@@ -249,22 +256,19 @@ pars.dca <-  global.result.df[ which.max(global.result.df$value.function.dca),  
 best.offset.dca <- unlist(pars.dca$offset)
 best.lambda.dca <- unlist(pars.dca$lambda)
 opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
-    train.covariates, train.prop.scores, train.reward, best.offset,
-    PolicyFunLinearKernel, best.lambda)
+    train.covariates, train.prop.scores, train.reward, best.offset.dca,
+    PolicyFunLinearKernel, best.lambda.dca)
 dtr.value.on.test.dca <- ValueFunction(opt.params.dca, test.treatment, 
     test.covariates,  test.prop.scores,  test.reward, 
-    best.offset, PolicyFunLinearKernel)
+    best.offset.dca, PolicyFunLinearKernel)
 
 
 # Plot DCA tuning results  ------------------------------------------------
 
-result.to.plot <- global.result.df[, names(global.result.df) %in%
-                                     c("offset", "lambda", "value.function.dca")]
-result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
-result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
 ggplot(result.to.plot, 
-       aes(x = offset, y = value.function.dca, colour = lambda)) + geom_line()
-
+       aes(x = offset, y = value.function.dca, colour = lambda)) + 
+  geom_line() + 
+  ggtitle("Cross validation results for Difference of Convex functions optimization") 
 
 # Plot DCA treatment assignment comparison --------------------------------
 
@@ -272,7 +276,7 @@ decision.values <- PolicyFunLinearKernel(opt.params.dca, test.covariates)
 rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
 plot(decision.values, test.treatment,
      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-     pch=20)
+     pch=20, main="DCA decisions versus observed")
 abline(0, 1)
 
 
@@ -286,7 +290,6 @@ legend("topleft", c("Recommended by DTR", "Observed"),
 
 
 
-
 # Simulated Annealing plotting --------------------------------------------
 
 best.dtr.value.on.train.gen.sa <- max(unlist(global.result.df$value.function.gen.sa)) 
@@ -294,37 +297,36 @@ pars.gen.sa <-  global.result.df[ which.max(global.result.df$value.function.gen.
 best.offset.gen.sa  <- unlist(pars.gen.sa$offset)
 best.lambda.gen.sa  <- unlist(pars.gen.sa$lambda)
 opt.params.gen.sa <- OptimizeParamsOfPolicyFunction(train.treatment,
-    train.covariates, train.prop.scores, train.reward, best.offset,
-    PolicyFunLinearKernel, best.lambda, list("obj.func"=ObjectiveFunction))
+    train.covariates, train.prop.scores, train.reward, best.offset.gen.sa,
+    PolicyFunLinearKernel, best.lambda.gen.sa, list("obj.func"=ObjectiveFunction))
 dtr.value.on.test.gen.sa <- ValueFunction(opt.params.gen.sa, test.treatment, 
     test.covariates,  test.prop.scores,  test.reward, 
-    best.offset, PolicyFunLinearKernel)
+    best.offset.gen.sa, PolicyFunLinearKernel)
 
 
 
 # Plot tuning results  ----------------------------------------------------
 
-result.to.plot <- global.result.df[, names(global.result.df) %in%
-                                     c("offset", "lambda", "value.function.gen.sa")]
-result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
-result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
-ggplot(result.to.plot, 
-       aes(x = offset, y = value.function.gen.sa, colour = lambda)) + geom_line()
+ggplot(result.to.plot,
+       aes(x = offset, y = value.function.gen.sa, colour = lambda)) +
+  geom_line() +
+  ggtitle("Cross validation results for Simulated Annealing optimization")
 
 
 # Plot treatment assignment comparison ------------------------------------
 
 decision.values <- PolicyFunLinearKernel(opt.params.gen.sa, test.covariates)
-rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
+rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / 
+  (max(test.reward) - min(test.reward))
 plot(decision.values, test.treatment,
      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-     pch=20)
+     pch=20,  main="Sim. Anneal decisions versus observed")
 abline(0, 1)
 
 
 # Plot treatment assignment density ---------------------------------------
 
-plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.8),
+plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.9),
      main = "Treatment density")
 lines(density(test.treatment), col="blue", lwd=4)
 legend("topleft", c("Recommended by DTR", "Observed"),
@@ -333,3 +335,7 @@ legend("topleft", c("Recommended by DTR", "Observed"),
 
 hist(decision.values)
 hist(test.reward)
+
+
+Sys.sleep(100)
+save.image("./src/Workspace.Rdata")

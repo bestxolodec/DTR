@@ -204,7 +204,7 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
     # -1 as an intercept term is already present in data matirx
     t.next.model <- rq(treatment ~ . - 1, tau=.5,
                        data = as.data.frame(data.with.target),
-                       weights = t.weights,  method="lasso")
+                       weights = t.weights,  method="lasso", lambda=lambda)
     t.next.params <-  t.next.model$coefficient
     if(sum((t.next.params - t.params) ** 2) < tolerance){
       break
@@ -217,10 +217,10 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
 
 # s <- DifferenceConvexOptimize(params=NULL, train.treatment, train.covariates,
 #      train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda)
-# opt.with.sa <-  OptimizeParamsOfPolicyFunction(train.treatment, train.covariates,
+# opt.with.sa.par <-  OptimizeParamsOfPolicyFunction(train.treatment, train.covariates,
 #     train.prop.scores,  train.reward, offset, PolicyFunLinearKernel, lambda,
 #     ObjectiveFunction)
-# ValueFunction(params=opt.with.sa$par, test.treatment, test.covariates,
+# ValueFunction(params=opt.with.sa.par, test.treatment, test.covariates,
 #     test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
 # ValueFunction(params=s, test.treatment, test.covariates,
 #     test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
