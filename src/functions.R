@@ -182,7 +182,7 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
 
 
 DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
-    propensity.scores, reward, offset, policy.function, lambda, 
+    propensity.scores, reward, offset, policy.function, lambda,
     hyperparams=list(), tolerance = 0.00001) {
   stopifnot(is.matrix(covariates))
   data.with.target <- c(data.frame(treatment), as.data.frame(covariates))
@@ -226,10 +226,11 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
 #     test.prop.scores,  test.reward, control.offset, PolicyFunLinearKernel)
 
 
+
 # Empirical Value Function  -----------------------------------------------
 
 ValueFunction <- function(params, treatment, covariates, prop.scores, reward, offset,
                           policy.function) {
-  loss <- pmax(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
-  return(mean(reward * loss / prop.scores / offset))
+  gain <- pmax(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
+  return(mean(reward * gain / prop.scores / offset))
 }
