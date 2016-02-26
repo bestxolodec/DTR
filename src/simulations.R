@@ -26,10 +26,16 @@ GetQfunctionValuesForFirstSimulation <- function(covariates, given.treatement, o
 # RewardFunctions ---------------------------------------------------------
 
 GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1,
-                                                   only.positive=TRUE, eps=0.01) {
+                                                   only.positive=TRUE, eps=0.01,
+                                                   ret.shift=TRUE) {
   norm.sample <- rnorm(NROW(q.function.values), q.function.values, variance)
   if (isTRUE(only.positive)) {
-    return(as.matrix(norm.sample - min(norm.sample) + eps))
+    constant.shift = - min(norm.sample) + eps
+    if (isTRUE(ret.shift)) {
+      return (list(shift=constant.shift, raw.reward=as.matrix(norm.sample)))
+    } else {
+      return (norm.sample + constant.shift)
+    }
   } else {
     return(norm.sample)
   }
@@ -51,12 +57,14 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
       given.treatement =  treatment,
       optimal.treatment = optimal.treatment)
   reward <- GetRewardGivenQfunctionValuesAsMeanVec(q.function.values)
-  prop.scores <- as.matrix(rep(1, nrow(covariates)))
-  # train.prop.scores <- GetPropensityScores(
-  #     as.data.frame(cbind(train.treatment, train.covariates)),
-  #     balance.formula = formula (V1 ~ .), two.step = T)
-  return(list(covariates=covariates, treatment=treatment, reward=reward,
-              prop.scores=prop.scores))
+  prop.scores <- rep(1, nrow(covariates))
+  # FIXME: Find out how to propely estimate propensity scores 
+  prop.scores <- GetPropensityScores(
+      data.frame("treatment"=treatment, "covars"=covariates),
+      balance.formula = formula (treatment ~ . - covars..Intercept.), 
+      two.step = T)
+  return(list(covariates=as.matrix(covariates), treatment=as.matrix(treatment),
+              reward=as.list(reward), prop.scores=as.matrix(prop.scores)))
 }
 
 
@@ -64,7 +72,7 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
 
 # covariates should already contain or not intercept
 OptimizeParamsOfPolicyFunction <- function(treatment, covariates, prop.scores,
-    reward, offset, policy.function, lambda,  opt.hyperparams=list()) {
+                                           reward, offset, policy.function, lambda,  opt.hyperparams=list()) {
   regression.model <- lm(treatment ~ covariates - 1, model=T, x=T)
   # TODO: Find out what to do with NA after regression
   initial.params <-  regression.model$coefficients
@@ -94,7 +102,7 @@ OptimizeParamsOfPolicyFunction <- function(treatment, covariates, prop.scores,
 # Get DTR value  ----------------------------------------------------------
 
 GetDtrValuesOnFolds <- function(folds, treatment, covariates, prop.scores,
-     reward, offset, control.offset, policy.function, lambda,
+     reward, raw.reward, offset, control.offset, policy.function, lambda,
      opt.hyperparams=list()) {
   #  For each list of row indicies in folds as control group perform train on
   #  rest indicies in folds and get optimal params. Return mean value function on
@@ -106,7 +114,9 @@ GetDtrValuesOnFolds <- function(folds, treatment, covariates, prop.scores,
   #   covariates: Obseravation data of patients.
   #   prop.scores: Correspond to observations in data.
   #   reward: Precomputed reward values of treatment treatment.
-  #           The greater reward, the better.
+  #           Only positive values. 
+  #   raw.reward: Precomputed reward values of treatment treatment. 
+  #               Could be also negativ
   #   offset: Smallest value of difference between
   #           observational treatment value and the predicted one,
   #           which is interpeted as full "1" loss
@@ -137,7 +147,7 @@ GetDtrValuesOnFolds <- function(folds, treatment, covariates, prop.scores,
     # cat("Params: ", params)
     control.covariates  <-  covariates [control.fold, ]
     control.treatment   <-  treatment  [control.fold, ]
-    control.reward      <-  reward     [control.fold, ]
+    control.reward      <-  raw.reward [control.fold, ]
     control.prop.scores <-  prop.scores[control.fold, ]
     dtr.value <- ValueFunction(params, control.treatment, control.covariates,
         control.prop.scores,  control.reward, control.offset, policy.function)
@@ -171,15 +181,18 @@ number.of.simulations <- 3
 # Prepare data  -----------------------------------------------------------
 
 train.data.list <- GetSimulationData(sample.size, number.of.covariates)
-train.covariates  = as.matrix(train.data.list$covariates)
-train.treatment   = as.matrix(train.data.list$treatment)
-train.reward      = as.matrix(train.data.list$reward)
-train.prop.scores = as.matrix(train.data.list$prop.scores)
+train.covariates  = train.data.list$covariates
+train.treatment   = train.data.list$treatment
+train.raw.reward  = train.data.list$reward$raw.reward 
+train.reward      = train.raw.reward + train.data.list$reward$shift
+train.prop.scores = train.data.list$prop.scores
+
 
 test.data.list <- GetSimulationData(test.data.sample.size, number.of.covariates)
 test.covariates  = test.data.list$covariates
 test.treatment   = test.data.list$treatment
-test.reward      = test.data.list$reward
+test.raw.reward  = test.data.list$reward$raw.reward
+test.reward      = test.raw.reward + test.data.list$reward$shift
 test.prop.scores = test.data.list$prop.scores
 
 
@@ -197,13 +210,13 @@ for (offset in  offsets) {
     #     control.offset, PolicyFunLinearKernel, lambda,
     #     list("obj.func"=ObjectiveFunction))
     dtr.values.dca <- GetDtrValuesOnFolds(folds, train.treatment,
-        train.covariates, train.prop.scores, train.reward, offset,
-        control.offset, PolicyFunLinearKernel, lambda)
+        train.covariates, train.prop.scores, train.reward, train.raw.reward,  
+        offset, control.offset, PolicyFunLinearKernel, lambda)
     opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
         train.covariates, train.prop.scores, train.reward, offset,
         PolicyFunLinearKernel, lambda)
     dtr.values.on.test.dca <- ValueFunction(opt.params.dca, test.treatment,
-        test.covariates,  test.prop.scores,  test.reward,
+        test.covariates,  test.prop.scores,  test.raw.reward,
         offset, PolicyFunLinearKernel)
     return (list("offset"=offset, "lambda"=lambda,
                  # "value.function.gen.sa"=mean.dtr.value.gen.sa,
@@ -226,11 +239,9 @@ result.to.plot$value.function.dca <- sapply(result.to.plot$value.function.dca, m
 result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
 result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
 
-
-best.dtr.value.on.train.dca <- max(unlist(global.result.df$value.function.dca))
 pars.dca <-  result.to.plot[ which.max(result.to.plot$value.function.dca),  ]
-best.offset.dca <- unlist(pars.dca$offset)
-best.lambda.dca <- unlist(pars.dca$lambda)
+best.offset.dca <- pars.dca$offset
+best.lambda.dca <- pars.dca$lambda
 
 
 opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
@@ -239,7 +250,7 @@ opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
 
 
 dtr.value.on.test.dca <- ValueFunction(opt.params.dca, test.treatment,
-    test.covariates,  test.prop.scores,  test.reward,
+    test.covariates,  test.prop.scores,  test.raw.reward,
     best.offset.dca, PolicyFunLinearKernel)
 
 
@@ -249,6 +260,7 @@ ggplot(result.to.plot, aes(x = offset, y = value.function.dca, colour = lambda))
   ggtitle("Cross validation results for Difference of Convex functions optimization")
 
 
+# plot decision values on test data
 decision.values <- PolicyFunLinearKernel(opt.params.dca, test.covariates)
 rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / 
                       (max(test.reward) - min(test.reward))
@@ -265,6 +277,7 @@ legend("topleft", c("Recommended by DTR", "Observed"),
        lwd=c(2.5,2.5),col=c("green","blue"), bty = "n")
 
 
+# get best possible combinations of lambda and offset based on test performance
 best.index <-  which.max(result.to.plot$dtr.values.on.test.dca)
 result.to.plot[best.index, ]
 best.lambda.on.test <- result.to.plot[best.index, "lambda"] 
@@ -272,20 +285,19 @@ best.offset.on.test <- result.to.plot[best.index, "offset"]
 pars.dca
 
 
+# plot best decision possible with specified combinations of offset x lambda 
+# using the test data as indicator
+opt.params.dca.on.test <- OptimizeParamsOfPolicyFunction(train.treatment,
+    train.covariates, train.prop.scores, train.reward, best.offset.on.test,
+    PolicyFunLinearKernel, best.lambda.on.test)
 
-
-
-# Best possible CV result -------------------------------------------------
-
-pars.dca <-  result.to.plot[ which.max(result.to.plot$value.function.dca),  ]
-best.offset.dca <- unlist(pars.dca$offset)
-best.lambda.dca <- unlist(pars.dca$lambda)
-
-decision.values <- PolicyFunLinearKernel(opt.params.dca, test.covariates)
-rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
-plot(decision.values, test.treatment,
+rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / 
+                      (max(test.reward) - min(test.reward))
+plot(PolicyFunLinearKernel(opt.params.dca.on.test, test.covariates), 
+     test.treatment,
      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
      pch=20, main="DCA decisions versus observed")
+
 abline(0, 1)
 
 
@@ -293,48 +305,6 @@ abline(0, 1)
 
 
 
-# Do grid search ----------------------------------------------------------
-
-dtrs.mean.on.test <-  list()
-for (i in seq(1, number.of.simulations)) {
-  global.result <- list()
-  for (offset in  offsets) {
-    print(paste("Optimization offset: ", offset))
-    result <- foreach (lambda = lambdas) %dopar% {
-      folds <- createFolds(train.treatment)
-      mean.dtr.value.gen.sa <- GetDtrValuesOnFolds(folds, train.treatment,
-          train.covariates, train.prop.scores, train.reward, offset,
-          control.offset, PolicyFunLinearKernel, lambda,
-          list("obj.func"=ObjectiveFunction))
-      mean.dtr.value.dca <- GetDtrValuesOnFolds(folds, train.treatment,
-          train.covariates, train.prop.scores, train.reward, offset,
-          control.offset, PolicyFunLinearKernel, lambda)
-      return (list("offset"=offset, "lambda"=lambda,
-                   "value.function.gen.sa"=mean.dtr.value.gen.sa,
-                   "value.function.dca"=mean.dtr.value.dca, ))
-    }
-    global.result <- c(global.result, result)
-  }
-  global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
-  colnames(global.result.df)  <- names(global.result[[1]])
-  pars <-  global.result.df[ which.max(global.result.df$value.function),  ]
-  best.dtr.value.on.train <- max(unlist(global.result.df$value.function))
-  best.offset  <- unlist(pars$offset)
-  best.lambda  <- unlist(pars$lambda)
-
-  opt.result <- OptimizeParamsOfPolicyFunction(train.treatment,
-      train.covariates, train.prop.scores, train.reward, best.offset,
-      PolicyFunLinearKernel, best.lambda, ObjectiveFunction)
-  dtr.value.on.test <- ValueFunction(opt.result$par, test.treatment,
-      test.covariates,  test.prop.scores,  test.reward,
-      best.offset, PolicyFunLinearKernel)
-
-  dtrs.mean.on.test <- c(dtrs.mean.on.test,
-     list(list("dtr.value.on.test"=dtr.value.on.test,
-               "best.offset"=best.offset, "best.lambda"=best.lambda,
-               "best.dtr.value.on.train"=best.dtr.value.on.train,
-               "opt.params"=opt.result$par)))
-}
 
 
 
@@ -343,131 +313,186 @@ for (i in seq(1, number.of.simulations)) {
 
 
 
-# Single shot comparison of different optimization techniques -------------
-
-global.result <- list()
-for (offset in  offsets) {
-  print(paste("Optimization offset: ", offset))
-  result <- foreach (lambda = lambdas) %dopar% {
-    folds <- createFolds(train.treatment)
-    mean.dtr.value.gen.sa <- GetDtrValuesOnFolds(folds, train.treatment,
-        train.covariates, train.prop.scores, train.reward, offset,
-        control.offset, PolicyFunLinearKernel, lambda,
-        list("obj.func"=ObjectiveFunction))
-    mean.dtr.value.dca <- GetDtrValuesOnFolds(folds, train.treatment,
-        train.covariates, train.prop.scores, train.reward, offset,
-        control.offset, PolicyFunLinearKernel, lambda)
-    mean.dtr.value.dca.l2 <- GetDtrValuesOnFolds(folds, train.treatment,
-        train.covariates, train.prop.scores, train.reward, offset,
-        control.offset, PolicyFunLinearKernel, lambda,
-        list(""))
-    return (list("offset"=offset, "lambda"=lambda,
-                 "value.function.gen.sa"=mean.dtr.value.gen.sa,
-                 "value.function.dca"=mean.dtr.value.dca,
-                 "value.function.dca.l2"=mean.dtr.value.dca.l2))
-  }
-  global.result <- c(global.result, result)
-}
-
-global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
-colnames(global.result.df)  <- names(global.result[[1]])
-result.to.plot <- global.result.df[, names(global.result.df) %in%
-                                     c("offset", "lambda",
-                                       "value.function.dca",
-                                       "value.function.gen.sa")]
-result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
-result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
-
-par(mfrow=c(2,2))
-par(mfrow=c(1,2))
-
-# DCA plotting ------------------------------------------------------------
-
-best.dtr.value.on.train.dca <- max(unlist(global.result.df$value.function.dca))
-pars.dca <-  global.result.df[ which.max(global.result.df$value.function.dca),  ]
-best.offset.dca <- unlist(pars.dca$offset)
-best.lambda.dca <- unlist(pars.dca$lambda)
-opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
-    train.covariates, train.prop.scores, train.reward, best.offset.dca,
-    PolicyFunLinearKernel, best.lambda.dca)
-dtr.value.on.test.dca <- ValueFunction(opt.params.dca, test.treatment,
-    test.covariates,  test.prop.scores,  test.reward,
-    best.offset.dca, PolicyFunLinearKernel)
-
-
-# Plot DCA tuning results  ------------------------------------------------
-
-ggplot(result.to.plot,
-       aes(x = offset, y = value.function.dca, colour = lambda)) +
-  geom_line() +
-  ggtitle("Cross validation results for Difference of Convex functions optimization")
-
-# Plot DCA treatment assignment comparison --------------------------------
-
-decision.values <- PolicyFunLinearKernel(opt.params.dca, test.covariates)
-rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
-plot(decision.values, test.treatment,
-     col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-     pch=20, main="DCA decisions versus observed")
-abline(0, 1)
-
-
-# Plot DCA treatment assignment density -----------------------------------
-
-plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.8),
-     main = "Treatment density")
-lines(density(test.treatment), col="blue", lwd=4)
-legend("topleft", c("Recommended by DTR", "Observed"),
-       lwd=c(2.5,2.5),col=c("green","blue"), bty = "n")
 
 
 
-# Simulated Annealing plotting --------------------------------------------
-
-best.dtr.value.on.train.gen.sa <- max(unlist(global.result.df$value.function.gen.sa))
-pars.gen.sa <-  global.result.df[ which.max(global.result.df$value.function.gen.sa),  ]
-best.offset.gen.sa  <- unlist(pars.gen.sa$offset)
-best.lambda.gen.sa  <- unlist(pars.gen.sa$lambda)
-opt.params.gen.sa <- OptimizeParamsOfPolicyFunction(train.treatment,
-    train.covariates, train.prop.scores, train.reward, best.offset.gen.sa,
-    PolicyFunLinearKernel, best.lambda.gen.sa, list("obj.func"=ObjectiveFunction))
-dtr.value.on.test.gen.sa <- ValueFunction(opt.params.gen.sa, test.treatment,
-    test.covariates,  test.prop.scores,  test.reward,
-    best.offset.gen.sa, PolicyFunLinearKernel)
 
 
-
-# Plot tuning results  ----------------------------------------------------
-
-ggplot(result.to.plot,
-       aes(x = offset, y = value.function.gen.sa, colour = lambda)) +
-  geom_line() +
-  ggtitle("Cross validation results for Simulated Annealing optimization")
-
-
-# Plot treatment assignment comparison ------------------------------------
-
-decision.values <- PolicyFunLinearKernel(opt.params.gen.sa, test.covariates)
-rewards.scaled.0.1 <- (test.reward - min(test.reward) ) /
-  (max(test.reward) - min(test.reward))
-plot(decision.values, test.treatment,
-     col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-     pch=20,  main="Sim. Anneal decisions versus observed")
-abline(0, 1)
-
-
-# Plot treatment assignment density ---------------------------------------
-
-plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.9),
-     main = "Treatment density")
-lines(density(test.treatment), col="blue", lwd=4)
-legend("topleft", c("Recommended by DTR", "Observed"),
-       lwd=c(2.5,2.5),col=c("green","blue"), bty = "n")
-
-
-hist(decision.values)
-hist(test.reward)
-
-
-Sys.sleep(100)
-save.image("./src/Workspace.Rdata")
+# # Do grid search ----------------------------------------------------------
+# 
+# dtrs.mean.on.test <-  list()
+# for (i in seq(1, number.of.simulations)) {
+#   global.result <- list()
+#   for (offset in  offsets) {
+#     print(paste("Optimization offset: ", offset))
+#     result <- foreach (lambda = lambdas) %dopar% {
+#       folds <- createFolds(train.treatment)
+#       mean.dtr.value.gen.sa <- GetDtrValuesOnFolds(folds, train.treatment,
+#           train.covariates, train.prop.scores, train.reward, offset,
+#           control.offset, PolicyFunLinearKernel, lambda,
+#           list("obj.func"=ObjectiveFunction))
+#       mean.dtr.value.dca <- GetDtrValuesOnFolds(folds, train.treatment,
+#           train.covariates, train.prop.scores, train.reward, offset,
+#           control.offset, PolicyFunLinearKernel, lambda)
+#       return (list("offset"=offset, "lambda"=lambda,
+#                    "value.function.gen.sa"=mean.dtr.value.gen.sa,
+#                    "value.function.dca"=mean.dtr.value.dca, ))
+#     }
+#     global.result <- c(global.result, result)
+#   }
+#   global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
+#   colnames(global.result.df)  <- names(global.result[[1]])
+#   pars <-  global.result.df[ which.max(global.result.df$value.function),  ]
+#   best.dtr.value.on.train <- max(unlist(global.result.df$value.function))
+#   best.offset  <- unlist(pars$offset)
+#   best.lambda  <- unlist(pars$lambda)
+# 
+#   opt.result <- OptimizeParamsOfPolicyFunction(train.treatment,
+#       train.covariates, train.prop.scores, train.reward, best.offset,
+#       PolicyFunLinearKernel, best.lambda, ObjectiveFunction)
+#   dtr.value.on.test <- ValueFunction(opt.result$par, test.treatment,
+#       test.covariates,  test.prop.scores,  test.reward,
+#       best.offset, PolicyFunLinearKernel)
+# 
+#   dtrs.mean.on.test <- c(dtrs.mean.on.test,
+#      list(list("dtr.value.on.test"=dtr.value.on.test,
+#                "best.offset"=best.offset, "best.lambda"=best.lambda,
+#                "best.dtr.value.on.train"=best.dtr.value.on.train,
+#                "opt.params"=opt.result$par)))
+# }
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# # Single shot comparison of different optimization techniques -------------
+# 
+# global.result <- list()
+# for (offset in  offsets) {
+#   print(paste("Optimization offset: ", offset))
+#   result <- foreach (lambda = lambdas) %dopar% {
+#     folds <- createFolds(train.treatment)
+#     mean.dtr.value.gen.sa <- GetDtrValuesOnFolds(folds, train.treatment,
+#         train.covariates, train.prop.scores, train.reward, offset,
+#         control.offset, PolicyFunLinearKernel, lambda,
+#         list("obj.func"=ObjectiveFunction))
+#     mean.dtr.value.dca <- GetDtrValuesOnFolds(folds, train.treatment,
+#         train.covariates, train.prop.scores, train.reward, offset,
+#         control.offset, PolicyFunLinearKernel, lambda)
+#     mean.dtr.value.dca.l2 <- GetDtrValuesOnFolds(folds, train.treatment,
+#         train.covariates, train.prop.scores, train.reward, offset,
+#         control.offset, PolicyFunLinearKernel, lambda,
+#         list(""))
+#     return (list("offset"=offset, "lambda"=lambda,
+#                  "value.function.gen.sa"=mean.dtr.value.gen.sa,
+#                  "value.function.dca"=mean.dtr.value.dca,
+#                  "value.function.dca.l2"=mean.dtr.value.dca.l2))
+#   }
+#   global.result <- c(global.result, result)
+# }
+# 
+# global.result.df <- as.data.frame(t(sapply(global.result, cbind)))
+# colnames(global.result.df)  <- names(global.result[[1]])
+# result.to.plot <- global.result.df[, names(global.result.df) %in%
+#                                      c("offset", "lambda",
+#                                        "value.function.dca",
+#                                        "value.function.gen.sa")]
+# result.to.plot <- as.data.frame(lapply(result.to.plot, as.numeric))
+# result.to.plot$lambda  <- as.factor(result.to.plot$lambda)
+# 
+# par(mfrow=c(2,2))
+# par(mfrow=c(1,2))
+# 
+# # DCA plotting ------------------------------------------------------------
+# 
+# best.dtr.value.on.train.dca <- max(unlist(global.result.df$value.function.dca))
+# pars.dca <-  global.result.df[ which.max(global.result.df$value.function.dca),  ]
+# best.offset.dca <- unlist(pars.dca$offset)
+# best.lambda.dca <- unlist(pars.dca$lambda)
+# opt.params.dca <- OptimizeParamsOfPolicyFunction(train.treatment,
+#     train.covariates, train.prop.scores, train.reward, best.offset.dca,
+#     PolicyFunLinearKernel, best.lambda.dca)
+# dtr.value.on.test.dca <- ValueFunction(opt.params.dca, test.treatment,
+#     test.covariates,  test.prop.scores,  test.reward,
+#     best.offset.dca, PolicyFunLinearKernel)
+# 
+# 
+# # Plot DCA tuning results  ------------------------------------------------
+# 
+# ggplot(result.to.plot,
+#        aes(x = offset, y = value.function.dca, colour = lambda)) +
+#   geom_line() +
+#   ggtitle("Cross validation results for Difference of Convex functions optimization")
+# 
+# # Plot DCA treatment assignment comparison --------------------------------
+# 
+# decision.values <- PolicyFunLinearKernel(opt.params.dca, test.covariates)
+# rewards.scaled.0.1 <- (test.reward - min(test.reward) ) / (max(test.reward) - min(test.reward))
+# plot(decision.values, test.treatment,
+#      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
+#      pch=20, main="DCA decisions versus observed")
+# abline(0, 1)
+# 
+# 
+# # Plot DCA treatment assignment density -----------------------------------
+# 
+# plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.8),
+#      main = "Treatment density")
+# lines(density(test.treatment), col="blue", lwd=4)
+# legend("topleft", c("Recommended by DTR", "Observed"),
+#        lwd=c(2.5,2.5),col=c("green","blue"), bty = "n")
+# 
+# 
+# 
+# # Simulated Annealing plotting --------------------------------------------
+# 
+# best.dtr.value.on.train.gen.sa <- max(unlist(global.result.df$value.function.gen.sa))
+# pars.gen.sa <-  global.result.df[ which.max(global.result.df$value.function.gen.sa),  ]
+# best.offset.gen.sa  <- unlist(pars.gen.sa$offset)
+# best.lambda.gen.sa  <- unlist(pars.gen.sa$lambda)
+# opt.params.gen.sa <- OptimizeParamsOfPolicyFunction(train.treatment,
+#     train.covariates, train.prop.scores, train.reward, best.offset.gen.sa,
+#     PolicyFunLinearKernel, best.lambda.gen.sa, list("obj.func"=ObjectiveFunction))
+# dtr.value.on.test.gen.sa <- ValueFunction(opt.params.gen.sa, test.treatment,
+#     test.covariates,  test.prop.scores,  test.reward,
+#     best.offset.gen.sa, PolicyFunLinearKernel)
+# 
+# 
+# 
+# # Plot tuning results  ----------------------------------------------------
+# 
+# ggplot(result.to.plot,
+#        aes(x = offset, y = value.function.gen.sa, colour = lambda)) +
+#   geom_line() +
+#   ggtitle("Cross validation results for Simulated Annealing optimization")
+# 
+# 
+# # Plot treatment assignment comparison ------------------------------------
+# 
+# decision.values <- PolicyFunLinearKernel(opt.params.gen.sa, test.covariates)
+# rewards.scaled.0.1 <- (test.reward - min(test.reward) ) /
+#   (max(test.reward) - min(test.reward))
+# plot(decision.values, test.treatment,
+#      col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
+#      pch=20,  main="Sim. Anneal decisions versus observed")
+# abline(0, 1)
+# 
+# 
+# # Plot treatment assignment density ---------------------------------------
+# 
+# plot(density(decision.values), col="green", lwd=4,  ylim=c(0, 0.9),
+#      main = "Treatment density")
+# lines(density(test.treatment), col="blue", lwd=4)
+# legend("topleft", c("Recommended by DTR", "Observed"),
+#        lwd=c(2.5,2.5),col=c("green","blue"), bty = "n")
+# 
+# 
+# hist(decision.values)
+# hist(test.reward)
+# 
+# 
+# Sys.sleep(100)
+# save.image("./src/Workspace.Rdata")

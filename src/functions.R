@@ -69,13 +69,25 @@ GetPropensityScores <- function(observations.with.metadata, balance.formula,
                                + VKORC1.genotype...1639.G.A..3673...chr16.31015190..rs9923231..C.T
                                + Macrolide.Antibiotics)
   }
-  x.balanced <- CBPS(balance.formula, data=observations.with.metadata, twostep=two.step)
+  x.balanced <- CBPS(balance.formula, data=observations.with.metadata,
+                     twostep=two.step, ATT=0)
   if (isTRUE(return.cbps.object)) {
     return (x.balanced)
   } else {
     return (x.balanced$fitted.values)
   }
 }
+
+# x.balanced <- CBPS(treatment ~ . - covars..Intercept., 
+#    data=data.frame("treatment"=test.treatment,  "covars"=test.covariates), 
+#    twostep=T, ATT=0)
+# 
+# prop.scores <- GetPropensityScores(
+#   data.frame("treatment"=train.treatment, "covars"=train.covariates),
+#   balance.formula = formula (treatment ~ . - covars..Intercept.), 
+#   two.step = T) 
+
+
 
 
 # Reward function ---------------------------------------------------------
