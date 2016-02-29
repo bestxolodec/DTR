@@ -78,14 +78,14 @@ GetPropensityScores <- function(observations.with.metadata, balance.formula,
   }
 }
 
-# x.balanced <- CBPS(treatment ~ . - covars..Intercept., 
-#    data=data.frame("treatment"=test.treatment,  "covars"=test.covariates), 
+# x.balanced <- CBPS(treatment ~ . - covars..Intercept.,
+#    data=data.frame("treatment"=test.treatment,  "covars"=test.covariates),
 #    twostep=T, ATT=0)
-# 
+#
 # prop.scores <- GetPropensityScores(
 #   data.frame("treatment"=train.treatment, "covars"=train.covariates),
-#   balance.formula = formula (treatment ~ . - covars..Intercept.), 
-#   two.step = T) 
+#   balance.formula = formula (treatment ~ . - covars..Intercept.),
+#   two.step = T)
 
 
 
@@ -241,8 +241,8 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
 
 # Empirical Value Function  -----------------------------------------------
 
-ValueFunction <- function(params, treatment, covariates, prop.scores, reward, offset,
-                          policy.function) {
+ValueFunction <- function(params, treatment, covariates, prop.scores, reward,
+                          offset, policy.function) {
   gain <- pmax(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
   return(mean(reward * gain / prop.scores / offset))
 }
