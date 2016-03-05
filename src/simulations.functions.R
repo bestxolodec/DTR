@@ -24,19 +24,11 @@ GetQfunctionValuesForFirstSimulation <- function(covariates, given.treatement, o
 # RewardFunctions ---------------------------------------------------------
 
 GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1,
-                                                   only.positive=TRUE, eps=0.01,
-                                                   ret.shift=TRUE) {
-  norm.sample <- rnorm(NROW(q.function.values), q.function.values, variance)
-  if (isTRUE(only.positive)) {
-    constant.shift = - min(norm.sample) + eps
-    if (isTRUE(ret.shift)) {
-      return (list(shift=constant.shift, raw.reward=as.matrix(norm.sample)))
-    } else {
-      return (norm.sample + constant.shift)
-    }
-  } else {
-    return(norm.sample)
-  }
+                                                   only.positive=TRUE, eps=0.01) {
+  raw.reward <- rnorm(NROW(q.function.values), q.function.values, variance)
+  reward <-  raw.reward - min(raw.reward) + eps
+  return (list(raw.reward=as.matrix(raw.reward), 
+               reward=as.matrix(reward)))
 }
 
 
@@ -54,29 +46,33 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
       covariates = as.data.frame(covariates),
       given.treatement =  treatment,
       optimal.treatment = optimal.treatment)
-  reward <- GetRewardGivenQfunctionValuesAsMeanVec(q.function.values)
-  prop.scores <- rep(1, nrow(covariates))
+  reward.list <- GetRewardGivenQfunctionValuesAsMeanVec(q.function.values)
+  stopifnot(is.list(reward.list))
+  # prop.scores <- rep(1, nrow(covariates))
   # FIXME: Find out how to propely estimate propensity scores
   prop.scores <- GetPropensityScores(
       data.frame("treatment"=treatment, "covars"=covariates),
-      balance.formula = formula (treatment ~ . - covars..Intercept.),
+      balance.formula = formula (treatment ~ . - covars..Intercept. - 1),
       two.step = T)
-  return(list(covariates=as.matrix(covariates), treatment=as.matrix(treatment),
-              reward=as.list(reward), prop.scores=as.matrix(prop.scores)))
+   return (
+     c(list(covariates=as.matrix(covariates), 
+            treatment=as.matrix(treatment),
+            prop.scores=as.matrix(prop.scores)), 
+       reward.list))
 }
 
 
 # Optimization routines ---------------------------------------------------
 
 # covariates should already contain or not intercept
-OptimizeParamsOfPolicyFunction <- function(treatment, covariates, prop.scores,
-      reward, offset, policy.function, lambda,  opt.hyperparams=list()) {
-  regression.model <- lm(treatment ~ covariates - 1, model=T, x=T)
+OptimizeParamsOfPolicyFunction <- function(obs.data, offset, policy.function, lambda,
+                                           opt.hyperparams=list()) {
+  regression.model <- lm(obs.data$treatment ~ obs.data$covariates - 1, model=T, x=T)
   # TODO: Find out what to do with NA after regression
-  initial.params <-  regression.model$coefficients
+  initial.params <- regression.model$coefficients
   initial.params <- replace(initial.params, is.na(initial.params), 0)
   if (isTRUE("obj.func"  %in% names(opt.hyperparams))) {
-    number.of.params <- ncol(covariates)
+    number.of.params <- ncol(obs.data$covariates)
     lower.params.threshold <- rep(-100, number.of.params)
     upper.params.threshold <- rep(100, number.of.params)
     optimized <- GenSA(par = initial.params, fn = opt.hyperparams$obj.func,
@@ -84,14 +80,14 @@ OptimizeParamsOfPolicyFunction <- function(treatment, covariates, prop.scores,
         control=list(smooth=T, verbose=TRUE, nb.stop.improvement=1000,
                      maxit=6000, temperature = 6000),
         # additional arguments which goes directly to ObjectiveFunction
-        treatment, covariates, prop.scores, reward, offset, policy.function, lambda)
+        obs.data, offset, policy.function, lambda)
     params  <- optimized$par
   } else if (isTRUE("opt.func"  %in% names(opt.hyperparams))) {
-    params <- opt.hyperparams$opt.func(params=initial.params, treatment,
-        covariates, prop.scores, reward, offset, policy.function, lambda)
+    params <- opt.hyperparams$opt.func(params=initial.params, obs.data,  
+                                       offset, policy.function, lambda)
   } else {
-    params <- DifferenceConvexOptimize(params=initial.params, treatment,
-        covariates, prop.scores, reward, offset, policy.function, lambda)
+    params <- DifferenceConvexOptimize(params=initial.params, obs.data, 
+                                       offset, policy.function, lambda)
   }
   return (params)
 }
@@ -99,72 +95,46 @@ OptimizeParamsOfPolicyFunction <- function(treatment, covariates, prop.scores,
 
 # Get DTR value  ----------------------------------------------------------
 
-GetDtrValuesOnFolds <- function(folds, treatment, covariates, prop.scores,
-     reward, raw.reward, offset, control.offset, policy.function, lambda,
-     opt.hyperparams=list()) {
-  #  For each list of row indicies in folds as control group perform train on
-  #  rest indicies in folds and get optimal params. Return mean value function on
-  #  dtr computed as mean of value function on folds.
-  #
-  # Args:
-  #   folds: list of numeric vectors of indicies of control sample as usual in k-fold
-  #   treatment: Observed treatment values for patients.
-  #   covariates: Obseravation data of patients.
-  #   prop.scores: Correspond to observations in data.
-  #   reward: Precomputed reward values of treatment treatment.
-  #           Only positive values.
-  #   raw.reward: Precomputed reward values of treatment treatment.
-  #               Could be also negativ
-  #   offset: Smallest value of difference between
-  #           observational treatment value and the predicted one,
-  #           which is interpeted as full "1" loss
-  #   control.offset: Offset for inter comparison of different dtr.values computed
-  #                   as value function's value
-  #   policy.function: Decision function of the form function(params, data, ...)
-  #                    which returns treatment given covariates.
-  #   lambda: Regularization parameter.
-  #   opt.hyperparams:  list of arguments to OptimizeParamsOfPolicyFunction
-  #                     if "obj.func" is in this list, it is assumed that we
-  #                     do simulated annealing rather then DCA optimization
-  #
-  # Returns:
-  #   Vector of DTR's value function on the particular folds
-
+GetDtrValuesOnFolds <- function(folds, obs.data, offset, control.offset,  
+                                policy.function, lambda, opt.hyperparams=list()) {
   dtrs <- numeric(length = 0)
   for (control.fold in folds) {
-    tune.covariates  <-  covariates [-control.fold, ]
-    tune.treatment   <-  treatment  [-control.fold, ]
-    tune.reward      <-  reward     [-control.fold, ]
-    tune.prop.scores <-  prop.scores[-control.fold, ]
-    params <- OptimizeParamsOfPolicyFunction(tune.treatment,
-        tune.covariates, tune.prop.scores, tune.reward, offset,
+    tune.obs.data <- list(
+      covariates  = as.matrix(obs.data$covariates [-control.fold, ]), 
+      treatment   = as.matrix(obs.data$treatment  [-control.fold, ]),
+      reward      = as.matrix(obs.data$reward     [-control.fold, ]),
+      prop.scores = as.matrix(obs.data$prop.scores[-control.fold, ])
+    )
+    params <- OptimizeParamsOfPolicyFunction(tune.obs.data, offset,
         policy.function, lambda, opt.hyperparams)
-    # params.gensa <- OptimizeParamsOfPolicyFunction(tune.treatment,
-    #     tune.covariates, tune.prop.scores, tune.reward, offset,
-    #     PolicyFunLinearKernel, lambda, list("obj.func"=ObjectiveFunction))
-    # cat("Params: ", params)
-    control.covariates  <-  covariates [control.fold, ]
-    control.treatment   <-  treatment  [control.fold, ]
-    control.reward      <-  raw.reward [control.fold, ]
-    control.prop.scores <-  prop.scores[control.fold, ]
-    dtr.value <- ValueFunction(params, control.treatment, control.covariates,
-        control.prop.scores,  control.reward, control.offset, policy.function)
-    # ValueFunction(params.gensa, control.treatment, control.covariates,
-    #     control.prop.scores,  control.reward, control.offset, policy.function)
-    # ValueFunction(p, control.treatment, control.covariates,
-    #     control.prop.scores,  control.reward, control.offset, policy.function)
+    control.obs.data <- list(
+      covariates  = as.matrix(obs.data$covariates [control.fold, ]), 
+      treatment   = as.matrix(obs.data$treatment  [control.fold, ]),
+      raw.reward      = as.matrix(obs.data$raw.reward [control.fold, ]),
+      prop.scores = as.matrix(obs.data$prop.scores[control.fold, ])
+    )
+    dtr.value <- ValueFunction(params = params,  obs.data = control.obs.data,  
+                               offset = control.offset, 
+                               policy.function = policy.function)
     dtrs <- c(dtrs, dtr.value)
-    # cat("DTRs: ", dtrs)
   }
   return(dtrs)
 }
 
 
 
+#  Plot decisions versus observed treatment  ------------------------------
 
-
-
-
+PlotDecsionsVersusObserved <- function(obs.data, policy.function, params, 
+                                       title="DCA decisions versus observed"){
+  decision.values <- policy.function(params, obs.data$covariates)
+  rewards.scaled.0.1 <- (obs.data$reward - min(obs.data$reward) ) / 
+                        (max(obs.data$reward) - min(obs.data$reward))
+  plot(decision.values, obs.data$treatment,
+       col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
+       pch=20, main=title)
+  abline(0, 1)  
+}
 
 
 

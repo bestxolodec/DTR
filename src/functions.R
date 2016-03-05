@@ -156,8 +156,7 @@ PolicyFunGaussKernel <- function(params, patient.covariates,
 
 # Objective function ------------------------------------------------------
 
-ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
-                              reward, offset, policy.function, lambda,
+ObjectiveFunction <- function(params, obs.data, offset, policy.function, lambda,
                               hyperparams=list()) {
   # Objective (risk) function for minimization problem. Includes regularization.
   #
@@ -179,9 +178,10 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
   #
   # Returns:
   #   Regularized risk function of DTR specified with policy.function.
-  prediction <- policy.function(params, covariates, hyperparams)
-  multiplier <- pmin(abs(treatment - prediction) / offset, 1)
-  risk.function.value <- mean(reward / prop.scores / (2 * offset) * multiplier)
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  loss <- pmin(abs(obs.data$treatment - prediction) / offset, 1)
+  denominator <- obs.data$prop.scores * (2 * offset)
+  risk.function.value <- mean(obs.data$reward * loss / denominator)
   # tail is because we dont penalize intercept parameter
   regularization.value <- lambda * sum(tail(params, -1) ** 2)
   return(risk.function.value + regularization.value)
@@ -193,13 +193,15 @@ ObjectiveFunction <- function(params, treatment, covariates, prop.scores,
 # Optimization with DC functions ------------------------------------------
 
 
-DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
-    propensity.scores, reward, offset, policy.function, lambda,
-    hyperparams=list(), tolerance = 0.00001) {
-  stopifnot(is.matrix(covariates))
-  data.with.target <- c(data.frame(treatment), as.data.frame(covariates))
+DifferenceConvexOptimize <- function(params=NULL, obs.data, offset,
+                                     policy.function, lambda,
+                                     hyperparams=list(),
+                                     tolerance = 0.00001) {
+  stopifnot(is.matrix(obs.data$covariates))
+  data.with.target <- c(data.frame(obs.data$treatment),
+                        as.data.frame(obs.data$covariates))
   if (is.null(params)) {
-    t.params <- runif(ncol(covariates), min=-1, max=1)  # default params
+    t.params <- runif(ncol(obs.data$covariates), min=-1, max=1)  # default params
   } else {
     t.params <- params
   }
@@ -208,13 +210,14 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
   repeat {
     cat("Iteration", iteration, "\n")
     t.params <- t.next.params
-    t.prediction <- policy.function(t.params, covariates, hyperparams)
-    t.abs.deviance.from.treatment  <- abs(treatment - t.prediction)
+    t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+    t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
     t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
-    t.weights  <- reward * t.Q.values / offset ** 2
+    # TODO: !!!
+    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores # seriously think about this !!!
     # TODO: think of how to use rq.fit.lasso() here
     # -1 as an intercept term is already present in data matirx
-    t.next.model <- rq(treatment ~ . - 1, tau=.5,
+    t.next.model <- rq(obs.data.treatment ~ . - 1, tau=.5,
                        data = as.data.frame(data.with.target),
                        weights = t.weights,  method="lasso", lambda=lambda)
     t.next.params <-  t.next.model$coefficient
@@ -241,8 +244,8 @@ DifferenceConvexOptimize <- function(params=NULL, treatment, covariates,
 
 # Empirical Value Function  -----------------------------------------------
 
-ValueFunction <- function(params, treatment, covariates, prop.scores, reward,
-                          offset, policy.function) {
-  gain <- pmax(1 - abs(treatment - policy.function(params, covariates)) / offset, 0)
-  return(mean(reward * gain / prop.scores / offset))
+ValueFunction <- function(params, obs.data,  offset, policy.function) {
+  abs.deviance <- abs(obs.data$treatment - policy.function(params, obs.data$covariates))
+  gain <- pmax(1 - abs.deviance / offset, 0)
+  return(mean(obs.data$raw.reward * gain / obs.data$prop.scores / offset))
 }
