@@ -48,12 +48,12 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
       optimal.treatment = optimal.treatment)
   reward.list <- GetRewardGivenQfunctionValuesAsMeanVec(q.function.values)
   stopifnot(is.list(reward.list))
-  # prop.scores <- rep(1, nrow(covariates))
   # FIXME: Find out how to propely estimate propensity scores
   prop.scores <- GetPropensityScores(
       data.frame("treatment"=treatment, "covars"=covariates),
       balance.formula = formula (treatment ~ . - covars..Intercept. - 1),
       two.step = T)
+  prop.scores <- rep(1, nrow(covariates))
    return (
      c(list(covariates=as.matrix(covariates), 
             treatment=as.matrix(treatment),

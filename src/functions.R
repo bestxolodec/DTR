@@ -192,39 +192,74 @@ ObjectiveFunction <- function(params, obs.data, offset, policy.function, lambda,
 
 # Optimization with DC functions ------------------------------------------
 
+# TODO: What if  abs.pred.deviance is zero ?
+# TODO: replace inverting matrix with Sherman–Morrison formula
+GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
+  # remove intercept
+  covars  <- covars[, ! grepl("intercept", tolower(colnames(covars)))]
+  # check there is no more intercept term
+  stopifnot(apply(covars, 2, sd) != 0)
 
+  sum.rel.weights  <- sum(relative.weights)
+  adj.vector <- colSums(as.vector(relative.weights) * covars / sum.rel.weights)
+  weighted.covars <- t(as.vector(relative.weights) * covars)
+  value.matrix  <- weighted.covars %*% sweep(covars, 2, adj.vector)
+  reg.matrix <- lambda * diag(ncol(value.matrix))
+  inv.matrix  <- solve(reg.matrix  + value.matrix)
+
+  subst.coef <-  sum(relative.weights * treatment) / sum.rel.weights
+  right.vector <- as.matrix(colSums(as.vector(relative.weights) * covars *
+                                    as.vector(treatment - subst.coef)))
+  w.next = inv.matrix %*% right.vector
+  b.next = sum(as.vector(relative.weights) * 
+               (treatment - covars %*% w.next)) /  sum.rel.weights
+  return (as.numeric(c(b.next, w.next)))
+}
+
+
+
+## TODO: Possible improvements in first coefs gessing with an lm model
 DifferenceConvexOptimize <- function(params=NULL, obs.data, offset,
                                      policy.function, lambda,
                                      hyperparams=list(),
-                                     tolerance = 0.00001) {
+                                     tolerance = 0.0000001) {
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
   if (is.null(params)) {
-    t.params <- runif(ncol(obs.data$covariates), min=-1, max=1)  # default params
+    t.params <- runif(ncol(obs.data$covariates), min=-1, max=1)
   } else {
     t.params <- params
   }
-  t.next.params <- t.params  # simply for first loop iteration
   iteration <- 0
+  ## remove this
+  prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+  t.abs.deviance.from.treatment  <- abs(obs.data$treatment - prediction)
+  t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+  ## remove this
   repeat {
+    iteration = iteration + 1
     cat("Iteration", iteration, "\n")
-    t.params <- t.next.params
     t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
     t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
-    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
-    # TODO: !!!
-    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores # seriously think about this !!!
-    # TODO: think of how to use rq.fit.lasso() here
-    # -1 as an intercept term is already present in data matirx
-    t.next.model <- rq(obs.data.treatment ~ . - 1, tau=.5,
-                       data = as.data.frame(data.with.target),
-                       weights = t.weights,  method="lasso", lambda=lambda)
-    t.next.params <-  t.next.model$coefficient
-    if(sum((t.next.params - t.params) ** 2) < tolerance){
+    # t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores
+    t.relative.weights  <- t.weights / t.abs.deviance.from.treatment
+    t.next.params  <-  GetNextStepParams(obs.data$covariates, obs.data$treatment,
+                                         t.relative.weights, lambda)
+    discrepancy <- sum((t.next.params - t.params) ** 2)
+    vf = ValueFunction(t.next.params, test, offset, policy.function)
+    objf = ObjectiveFunction(t.next.params, obs.data = test, policy.function = policy.function, 
+                             offset=offset, lambda=lambda)
+    dctfun.val = DCTargetFunction(t.next.params, t.params, test, offset, 
+                                  PolicyFunLinearKernel, lambda)  
+    cat("Discrepancy: ", discrepancy, " Value Function: ", vf, " Obj.Function: ", objf, 
+        " DCTtarget: ", dctfun.val, "\n")
+    if(discrepancy < tolerance){
       break
     }
-    iteration = iteration + 1
+    t.params  <- t.next.params
+    # Sys.sleep(1)
   }
   return(t.next.params)
 }
@@ -248,4 +283,23 @@ ValueFunction <- function(params, obs.data,  offset, policy.function) {
   abs.deviance <- abs(obs.data$treatment - policy.function(params, obs.data$covariates))
   gain <- pmax(1 - abs.deviance / offset, 0)
   return(mean(obs.data$raw.reward * gain / obs.data$prop.scores / offset))
+}
+
+
+
+
+# DC Target function ------------------------------------------------------
+DCTargetFunction <- function(next.params, prev.params, obs.data, offset, 
+                             policy.function, lambda, hyperparams=list()) {
+  # Objective (risk) function for minimization problem
+  t.prediction <- policy.function(prev.params, obs.data$covariates, hyperparams)
+  t.abs.deviance.from.treatment = abs(obs.data$treatment  -  t.prediction)
+  t.Q.R.values <- ifelse(t.abs.deviance.from.treatment <= offset, obs.data$reward, 0)
+  
+  t.next.prediction <- policy.function(next.params, obs.data$covariates, hyperparams)
+  t.next.abs.deviance.from.treatment = abs(obs.data$treatment - t.next.prediction)
+  risk.func.value = sum(t.Q.R.values * t.next.abs.deviance.from.treatment) / (offset ** 2)
+  # tail is because we dont penalize intercept parameter
+  regularization.value <- 0.5 * lambda * sum(tail(next.params, -1) ** 2)
+  return(risk.func.value + regularization.value) 
 }

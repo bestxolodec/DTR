@@ -4,9 +4,10 @@
 *.synctex.gz
 *.Rhistory
 .DS_Store
-.RData
+*.RData
 *Rproj*
 DIPLOMA.Rproj
 .Rproj.user
 *Icon*
 *.swp
+*.ipynb_checkpoints
