@@ -86,8 +86,7 @@ OptimizeParamsOfPolicyFunction <- function(obs.data, offset, policy.function, la
     params <- opt.hyperparams$opt.func(params=initial.params, obs.data,  
                                        offset, policy.function, lambda)
   } else {
-    params <- DifferenceConvexOptimize(params=initial.params, obs.data, 
-                                       offset, policy.function, lambda)
+    stop("Uknown optimization technique! Please provide 'opt.func' key in hyperparams!")
   }
   return (params)
 }

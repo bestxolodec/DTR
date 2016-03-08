@@ -219,10 +219,10 @@ GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
 
 
 ## TODO: Possible improvements in first coefs gessing with an lm model
-DifferenceConvexOptimize <- function(params=NULL, obs.data, offset,
-                                     policy.function, lambda,
-                                     hyperparams=list(),
-                                     tolerance = 0.0000001) {
+DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
+                                        policy.function, lambda,
+                                        hyperparams=list(),
+                                        tolerance = 1e-8) {
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
@@ -231,35 +231,101 @@ DifferenceConvexOptimize <- function(params=NULL, obs.data, offset,
   } else {
     t.params <- params
   }
+  subsequent.converged.iters <- 5
+  converged.iters <- 0
   iteration <- 0
   ## remove this
-  prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
-  t.abs.deviance.from.treatment  <- abs(obs.data$treatment - prediction)
-  t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+  # prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+  # t.abs.deviance.from.treatment  <- abs(obs.data$treatment - prediction)
+  # t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
   ## remove this
+  iter.info = list()
   repeat {
+    if (iteration > 1000) {
+      stop("Infinite iterations in MM algorithm!")
+    }
     iteration = iteration + 1
     cat("Iteration", iteration, "\n")
     t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
     t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
-    # t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    # TODO:  get rid of this 
+    # t.abs.deviance.from.treatment <- ifelse(
+    #   t.abs.deviance.from.treatment == 0,  1e-8, t.abs.deviance.from.treatment) 
+    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
     t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores
     t.relative.weights  <- t.weights / t.abs.deviance.from.treatment
     t.next.params  <-  GetNextStepParams(obs.data$covariates, obs.data$treatment,
                                          t.relative.weights, lambda)
     discrepancy <- sum((t.next.params - t.params) ** 2)
-    vf = ValueFunction(t.next.params, test, offset, policy.function)
-    objf = ObjectiveFunction(t.next.params, obs.data = test, policy.function = policy.function, 
+    
+    vf.test = ValueFunction(t.next.params, test, offset, policy.function)
+    vf.train = ValueFunction(t.next.params, train, offset, policy.function)
+    objf.test = ObjectiveFunction(t.next.params, obs.data = test, 
+                             policy.function = policy.function, 
                              offset=offset, lambda=lambda)
-    dctfun.val = DCTargetFunction(t.next.params, t.params, test, offset, 
-                                  PolicyFunLinearKernel, lambda)  
-    cat("Discrepancy: ", discrepancy, " Value Function: ", vf, " Obj.Function: ", objf, 
-        " DCTtarget: ", dctfun.val, "\n")
-    if(discrepancy < tolerance){
-      break
+    objf.train = ObjectiveFunction(t.next.params, obs.data = train, 
+                             policy.function = policy.function, 
+                             offset=offset, lambda=lambda)
+    next.dctfun.val = DCTargetFunction(t.next.params, t.params, train, offset, 
+                                  policy.function, lambda)  
+    prev.dctfun.val = DCTargetFunction(t.params, t.params, train, offset, 
+                                  policy.function, lambda)  
+    # cat("Discr: ", discrepancy, " ValFunc: ", vf, " Obj.Func: ", objf, 
+    #     " DCT: ", next.dctfun.val, " DeltaDCT: ", 
+    #     prev.dctfun.val - next.dctfun.val, "\n")
+    info <- list("discrepancy" =  discrepancy, "valuefunc.train" = vf.train, 
+                 "valuefunc.test" = vf.test, "obj.func.train" = objf.train,  
+                 "obj.func.test" = objf.test, "dct" = prev.dctfun.val, 
+                 "deltadct" =   prev.dctfun.val - next.dctfun.val, 
+                 "params" = t.next.params, "iteration"=iteration)
+    iter.info[[length(iter.info) + 1]] <- info
+    
+    if(discrepancy < tolerance) {
+      if (converged.iters == subsequent.converged.iters) {
+        save(iter.info, file = "../.various.Rdata/Iter.info")
+        break 
+      } else {
+        converged.iters <-  converged.iters + 1
+      }
+    } else {
+      converged.iters <- 0
     }
     t.params  <- t.next.params
     # Sys.sleep(1)
+  }
+  return(t.next.params)
+}
+
+
+
+DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
+                                     policy.function, lambda,
+                                     hyperparams=list(),
+                                     tolerance = 0.00001) {
+  stopifnot(is.matrix(obs.data$covariates))
+  data.with.target <- c(data.frame(obs.data$treatment),
+                        as.data.frame(obs.data$covariates))
+  if (is.null(params)) {
+    t.params <- runif(ncol(obs.data$covariates), min=-1, max=1)  # default params
+  } else {
+    t.params <- params
+  }
+  t.next.params <- t.params  # simply for first loop iteration
+  iteration <- 0
+  repeat {
+    t.params <- t.next.params
+    t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+    t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
+    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
+    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores # seriously think about this !!!
+    t.next.model <- rq(obs.data.treatment ~ . - 1, tau=.5,
+                       data = as.data.frame(data.with.target),
+                       weights = t.weights,  method="lasso", lambda=lambda)
+    t.next.params <-  t.next.model$coefficient
+    if(sum((t.next.params - t.params) ** 2) < tolerance){
+      break
+    }
+    iteration = iteration + 1
   }
   return(t.next.params)
 }
@@ -291,14 +357,13 @@ ValueFunction <- function(params, obs.data,  offset, policy.function) {
 # DC Target function ------------------------------------------------------
 DCTargetFunction <- function(next.params, prev.params, obs.data, offset, 
                              policy.function, lambda, hyperparams=list()) {
-  # Objective (risk) function for minimization problem
   t.prediction <- policy.function(prev.params, obs.data$covariates, hyperparams)
   t.abs.deviance.from.treatment = abs(obs.data$treatment  -  t.prediction)
   t.Q.R.values <- ifelse(t.abs.deviance.from.treatment <= offset, obs.data$reward, 0)
   
   t.next.prediction <- policy.function(next.params, obs.data$covariates, hyperparams)
-  t.next.abs.deviance.from.treatment = abs(obs.data$treatment - t.next.prediction)
-  risk.func.value = sum(t.Q.R.values * t.next.abs.deviance.from.treatment) / (offset ** 2)
+  t.next.abs.deviance.from.treatment <- abs(obs.data$treatment - t.next.prediction)
+  risk.func.value <- sum(t.Q.R.values * t.next.abs.deviance.from.treatment) / (offset ** 2)
   # tail is because we dont penalize intercept parameter
   regularization.value <- 0.5 * lambda * sum(tail(next.params, -1) ** 2)
   return(risk.func.value + regularization.value) 
