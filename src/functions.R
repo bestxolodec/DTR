@@ -220,9 +220,8 @@ GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
 
 ## TODO: Possible improvements in first coefs gessing with an lm model
 DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
-                                        policy.function, lambda,
-                                        hyperparams=list(),
-                                        tolerance = 1e-8) {
+  policy.function, lambda, hyperparams=list(), 
+  debug.file=NULL, tolerance=1e-8) {
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
@@ -258,31 +257,32 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
                                          t.relative.weights, lambda)
     discrepancy <- sum((t.next.params - t.params) ** 2)
     
-    vf.test = ValueFunction(t.next.params, test, offset, policy.function)
-    vf.train = ValueFunction(t.next.params, train, offset, policy.function)
-    objf.test = ObjectiveFunction(t.next.params, obs.data = test, 
-                             policy.function = policy.function, 
-                             offset=offset, lambda=lambda)
-    objf.train = ObjectiveFunction(t.next.params, obs.data = train, 
-                             policy.function = policy.function, 
-                             offset=offset, lambda=lambda)
-    next.dctfun.val = DCTargetFunction(t.next.params, t.params, train, offset, 
-                                  policy.function, lambda)  
-    prev.dctfun.val = DCTargetFunction(t.params, t.params, train, offset, 
-                                  policy.function, lambda)  
-    # cat("Discr: ", discrepancy, " ValFunc: ", vf, " Obj.Func: ", objf, 
-    #     " DCT: ", next.dctfun.val, " DeltaDCT: ", 
-    #     prev.dctfun.val - next.dctfun.val, "\n")
-    info <- list("discrepancy" =  discrepancy, "valuefunc.train" = vf.train, 
-                 "valuefunc.test" = vf.test, "obj.func.train" = objf.train,  
-                 "obj.func.test" = objf.test, "dct" = prev.dctfun.val, 
-                 "deltadct" =   prev.dctfun.val - next.dctfun.val, 
-                 "params" = t.next.params, "iteration"=iteration)
-    iter.info[[length(iter.info) + 1]] <- info
     
+    if (! is.null(debug.file)) {
+      vf.test = ValueFunction(t.next.params, test, offset, policy.function)
+      vf.train = ValueFunction(t.next.params, train, offset, policy.function)
+      objf.test = ObjectiveFunction(t.next.params, obs.data = test, 
+                               policy.function = policy.function, 
+                               offset=offset, lambda=lambda)
+      objf.train = ObjectiveFunction(t.next.params, obs.data = train, 
+                               policy.function = policy.function, 
+                               offset=offset, lambda=lambda)
+      next.dctfun.val = DCTargetFunction(t.next.params, t.params, train, offset, 
+                                    policy.function, lambda)  
+      prev.dctfun.val = DCTargetFunction(t.params, t.params, train, offset, 
+                                    policy.function, lambda)  
+      info <- list("discrepancy" =  discrepancy, "valuefunc.train" = vf.train, 
+                   "valuefunc.test" = vf.test, "obj.func.train" = objf.train,  
+                   "obj.func.test" = objf.test, "dct" = prev.dctfun.val, 
+                   "deltadct" =   prev.dctfun.val - next.dctfun.val, 
+                   "params" = t.next.params, "iteration"=iteration)
+      iter.info[[length(iter.info) + 1]] <- info
+    }
     if(discrepancy < tolerance) {
       if (converged.iters == subsequent.converged.iters) {
-        save(iter.info, file = "../.various.Rdata/Iter.info")
+        if (! is.null(debug.file)) {
+          save(iter.info, file = debug.file)
+        }
         break 
       } else {
         converged.iters <-  converged.iters + 1
@@ -291,7 +291,6 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
       converged.iters <- 0
     }
     t.params  <- t.next.params
-    # Sys.sleep(1)
   }
   return(t.next.params)
 }
