@@ -204,7 +204,7 @@ GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
   adj.vector <- colSums(as.vector(relative.weights) * covars / sum.rel.weights)
   weighted.covars <- t(as.vector(relative.weights) * covars)
   value.matrix  <- weighted.covars %*% sweep(covars, 2, adj.vector)
-  reg.matrix <- lambda * diag(ncol(value.matrix))
+  reg.matrix <- lambda * diag(x = ncol(value.matrix))
   inv.matrix  <- solve(reg.matrix  + value.matrix)
 
   subst.coef <-  sum(relative.weights * treatment) / sum.rel.weights
@@ -220,8 +220,10 @@ GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
 
 ## TODO: Possible improvements in first coefs gessing with an lm model
 DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
-  policy.function, lambda, hyperparams=list(), 
-  debug.file=NULL, tolerance=1e-8) {
+    policy.function, lambda, hyperparams=list(), 
+    opt.hyperparams=list()) {
+  default.list <- list(debug.file=NULL, approximation.eps=NULL,  tolerance=1e-6)
+  opt.hyperparams <- modifyList(default.list, opt.hyperparams)
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
@@ -233,32 +235,30 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
   subsequent.converged.iters <- 5
   converged.iters <- 0
   iteration <- 0
-  ## remove this
-  # prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
-  # t.abs.deviance.from.treatment  <- abs(obs.data$treatment - prediction)
-  # t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
-  ## remove this
   iter.info = list()
   repeat {
     if (iteration > 1000) {
-      stop("Infinite iterations in MM algorithm!")
+      save(iter.info, file = opt.hyperparams$debug.file)
+      stop("Infinite iterations of MM algorithm!")
     }
     iteration = iteration + 1
-    cat("Iteration", iteration, "\n")
     t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
-    t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
-    # TODO:  get rid of this 
-    # t.abs.deviance.from.treatment <- ifelse(
-    #   t.abs.deviance.from.treatment == 0,  1e-8, t.abs.deviance.from.treatment) 
-    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
-    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores
-    t.relative.weights  <- t.weights / t.abs.deviance.from.treatment
-    t.next.params  <-  GetNextStepParams(obs.data$covariates, obs.data$treatment,
+    t.abs.deviance.from.treatment <- abs(obs.data$treatment - t.prediction)
+    t.Q.values <- ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    t.weights <- obs.data$reward * t.Q.values / (offset ** 2) / obs.data$prop.scores
+    if (is.null(opt.hyperparams$approximation.eps)) {
+      # cat("OLD METHOD!\n")
+      t.relative.weights <- t.weights / t.abs.deviance.from.treatment
+    } else {
+      t.relative.weights <- 2 * t.weights ** 2 / 
+        (opt.hyperparams$approximation.eps + 2 * t.weights * t.abs.deviance.from.treatment)
+    }
+    t.next.params <- GetNextStepParams(obs.data$covariates, obs.data$treatment,
                                          t.relative.weights, lambda)
     discrepancy <- sum((t.next.params - t.params) ** 2)
     
     
-    if (! is.null(debug.file)) {
+    if (! is.null(opt.hyperparams$debug.file)) {
       vf.test = ValueFunction(t.next.params, test, offset, policy.function)
       vf.train = ValueFunction(t.next.params, train, offset, policy.function)
       objf.test = ObjectiveFunction(t.next.params, obs.data = test, 
@@ -278,10 +278,11 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
                    "params" = t.next.params, "iteration"=iteration)
       iter.info[[length(iter.info) + 1]] <- info
     }
-    if(discrepancy < tolerance) {
+    if(discrepancy < opt.hyperparams$tolerance) {
       if (converged.iters == subsequent.converged.iters) {
-        if (! is.null(debug.file)) {
-          save(iter.info, file = debug.file)
+        if (! is.null(opt.hyperparams$debug.file)) {
+          save(iter.info, file = opt.hyperparams$debug.file)
+          cat("Converged after ", iteration, " iterations\n")
         }
         break 
       } else {
@@ -298,9 +299,9 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
 
 
 DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
-                                     policy.function, lambda,
-                                     hyperparams=list(),
-                                     tolerance = 0.00001) {
+    policy.function, lambda, hyperparams=list(),
+    opt.hyperparams=list()) {
+  opt.hyperparams <- modifyList(opt.hyperparams, list(tolerance=1e-8))
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
@@ -321,7 +322,7 @@ DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
                        data = as.data.frame(data.with.target),
                        weights = t.weights,  method="lasso", lambda=lambda)
     t.next.params <-  t.next.model$coefficient
-    if(sum((t.next.params - t.params) ** 2) < tolerance){
+    if(sum((t.next.params - t.params) ** 2) < opt.hyperparams$tolerance) {
       break
     }
     iteration = iteration + 1
