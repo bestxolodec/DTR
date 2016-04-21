@@ -154,46 +154,12 @@ PolicyFunGaussKernel <- function(params, patient.covariates,
 
 
 
-# Objective function ------------------------------------------------------
-
-ObjectiveFunction <- function(params, obs.data, offset, policy.function, lambda,
-                              hyperparams=list()) {
-  # Objective (risk) function for minimization problem. Includes regularization.
-  #
-  # Args:
-  #   params: Model parameters for policy.function -- are being changed
-  #           during minimization procedure.
-  #   treatment: Observed treatment values for patients.
-  #   covariates: Obseravation data of patients.
-  #   prop.scores: Correspond to observations in data.
-  #   reward: Precomputed reward values of treatment treatment.
-  #           The greater reward, the better.
-  #   offset: Smallest value of difference between
-  #           observational treatment value and the predicted one,
-  #           which is interpeted as full "1" loss
-  #   policy.function: Decision function of the form function(params, data, ...)
-  #                    which returns treatment given covariates.
-  #   lambda: Regularization parameter.
-  #   hyperparams:  list of hyperparameters for policy function
-  #
-  # Returns:
-  #   Regularized risk function of DTR specified with policy.function.
-  prediction <- policy.function(params, obs.data$covariates, hyperparams)
-  loss <- pmin(abs(obs.data$treatment - prediction) / offset, 1)
-  denominator <- obs.data$prop.scores * (2 * offset)
-  risk.function.value <- mean(obs.data$reward * loss / denominator)
-  # tail is because we dont penalize intercept parameter
-  regularization.value <- lambda * sum(tail(params, -1) ** 2)
-  return(risk.function.value + regularization.value)
-}
 
 
 
 
 # Optimization with DC functions ------------------------------------------
 
-# TODO: What if  abs.pred.deviance is zero ?
-# TODO: replace inverting matrix with Sherman–Morrison formula
 GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
   # remove intercept
   covars  <- covars[, ! grepl("intercept", tolower(colnames(covars)))]
@@ -227,6 +193,7 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
   stopifnot(is.matrix(obs.data$covariates))
   data.with.target <- c(data.frame(obs.data$treatment),
                         as.data.frame(obs.data$covariates))
+  ## TODO: remove this !
   if (is.null(params)) {
     t.params <- runif(ncol(obs.data$covariates), min=-1, max=1)
   } else {
@@ -239,7 +206,8 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
   repeat {
     if (iteration > 1000) {
       save(iter.info, file = opt.hyperparams$debug.file)
-      stop("Infinite iterations of MM algorithm!")
+      stop("Infinite iterations of MM algorithm! Saved iter.info to ", 
+           opt.hyperparams$debug.file)
     }
     iteration = iteration + 1
     t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
@@ -253,8 +221,8 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
       t.relative.weights <- 2 * t.weights ** 2 / 
         (opt.hyperparams$approximation.eps + 2 * t.weights * t.abs.deviance.from.treatment)
     }
-    t.next.params <- GetNextStepParams(obs.data$covariates, obs.data$treatment,
-                                         t.relative.weights, lambda)
+    t.next.params <- GetNextStepParams(obs.data$covariates, obs.data$treatment, 
+                                       t.relative.weights, lambda)
     discrepancy <- sum((t.next.params - t.params) ** 2)
     
     
@@ -298,6 +266,86 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
 
 
 
+GetFuncMinWithMM <- function(init.pars, covars, treatment, weights, lambda, eps, tol) {
+  params <- init.pars
+  sequential.converged.iters <- 3
+  converged.iters <- 0
+  iteration <- 0
+  repeat {
+    iteration <- iteration + 1
+    prediction <- PolicyFunLinearKernel(params, covars)
+    abs.deviance <- abs(treatment - prediction)
+    stopifnot(sum(abs.deviance < 1e-17) == 0)
+    if (is.null(eps)) {
+      relative.weights <- weights / abs.deviance
+    } else {
+      relative.weights <- 2 * weights ** 2 / (eps + 2 * weights * abs.deviance)
+    }
+    next.params <- GetNextStepParams(covars, treatment, relative.weights, lambda)
+    discrepancy <- sum((next.params - params) ** 2)
+    if(discrepancy < tol) {
+      if (converged.iters == sequential.converged.iters) {
+        break 
+      } else {
+        converged.iters <-  converged.iters + 1
+      }
+    } else {
+      converged.iters <- 0
+    }
+    params <- next.params
+  }
+  # cat("MM converged after ", iteration - sequential.converged.iters, " iterations\n")
+  return (next.params)
+}
+
+## TODO: Possible improvements in first coefs gessing with an lm model
+DCOptimizeWithMML2PenalizedProperIters <- function(params=NULL, obs.data, offset,
+    policy.function, lambda, hyperparams=list(), 
+    opt.hyperparams=list()) {
+  default.list <- list(debug.file=NULL, approximation.eps=NULL, tolerance=1e-6, q=0.65)
+  opt.hyperparams <- modifyList(default.list, opt.hyperparams)
+  stopifnot(is.matrix(obs.data$covariates))
+  stopifnot(! is.null(params))
+  t.params <- params
+  # if (is.null(params)) {
+  #   
+  #   index = obs.data$reward > quantile(obs.data$reward, opt.hyperparams$q) 
+  #   rqmodel = rq(obs.data$treatment[index] ~ obs.data$covariates[index,] - 1, tau=.5, 
+  #                method="lasso", weights=obs.data$reward[index], lambda = 1)
+  #   t.params = coef(rqmodel) 
+  #   cat("GENERATE initial approximation of decision!\n")
+  # } else {
+  #   cat("Setting supplied params!\n")
+  #   t.params <- params
+  # }
+  iteration <- 0
+  t.prev.Q.values <- rep(0, length(obs.data$treatment))
+  repeat {
+    iteration <- iteration + 1
+    if (iteration > 1000) {
+      stop("Infinite iterations (more than 1000) of DC algorithm!")
+    }
+    t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+    t.abs.deviance.from.treatment <- abs(obs.data$treatment - t.prediction)
+    t.Q.values <- ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    if (sum(t.prev.Q.values !=  t.Q.values) == 0)  {
+     break 
+    }
+    t.weights <- obs.data$reward * t.Q.values / (offset ** 2) / obs.data$prop.scores
+    t.params <- GetFuncMinWithMM(t.params, obs.data$covariates, 
+                                 obs.data$treatment, t.weights,  
+                                 lambda, opt.hyperparams$approximation.eps, 
+                                 opt.hyperparams$tolerance)
+    t.prev.Q.values <- t.Q.values
+  }
+  cat("MML2PenalizedProperIters Converged after ", iteration, " iterations\n")
+  return(t.params)
+}
+
+
+
+
+
 DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
     policy.function, lambda, hyperparams=list(),
     opt.hyperparams=list()) {
@@ -312,23 +360,48 @@ DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
   }
   t.next.params <- t.params  # simply for first loop iteration
   iteration <- 0
+  subsequent.converged.iters <- 3
+  converged.iters <- 0
   repeat {
     t.params <- t.next.params
     t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
     t.abs.deviance.from.treatment  <- abs(obs.data$treatment - t.prediction)
-    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 0, 1)
-    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores # seriously think about this !!!
+    t.Q.values  <-  ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    t.weights  <- obs.data$reward * t.Q.values / (offset ** 2)  / obs.data$prop.scores
     t.next.model <- rq(obs.data.treatment ~ . - 1, tau=.5,
                        data = as.data.frame(data.with.target),
                        weights = t.weights,  method="lasso", lambda=lambda)
-    t.next.params <-  t.next.model$coefficient
-    if(sum((t.next.params - t.params) ** 2) < opt.hyperparams$tolerance) {
-      break
+    t.next.params <-  coef(t.next.model)
+    discrepancy <- sum((t.next.params - t.params) ** 2)
+    if(discrepancy < opt.hyperparams$tolerance) {
+      if (converged.iters == subsequent.converged.iters) {
+        break 
+      } else {
+        converged.iters <-  converged.iters + 1
+      }
+    } else {
+      converged.iters <- 0
     }
     iteration = iteration + 1
   }
+  cat("DCOptimizeL1Penalized converged after ", iteration, " iterations\n")
   return(t.next.params)
 }
+
+  
+
+
+GetOwlParams <-  function(data, lambda, q=0.6) {
+  constant = min(quantile(data$raw.reward, q), 0)
+  data$weight = data$raw.reward - constant
+  index = which(data$raw.reward  > quantile(data$raw.reward, q))
+  rqmodel = rq(data$treatment[index] ~ data$covariates[index,] - 1, .5, 
+               method="lasso", weights=data$weight[index], lambda = lambda)
+  coefs = coef(rqmodel)
+  return (matrix(coefs))
+}
+
+
 
 
 # s <- DifferenceConvexOptimize(params=NULL, train.treatment, train.covariates,
@@ -345,12 +418,46 @@ DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
 
 # Empirical Value Function  -----------------------------------------------
 
-ValueFunction <- function(params, obs.data,  offset, policy.function) {
-  abs.deviance <- abs(obs.data$treatment - policy.function(params, obs.data$covariates))
+ValueFunction <- function(params, obs.data,  offset, policy.function, 
+                          hyperparams=list()) {
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  abs.deviance <- abs(obs.data$treatment - prediction)
   gain <- pmax(1 - abs.deviance / offset, 0)
   return(mean(obs.data$raw.reward * gain / obs.data$prop.scores / offset))
 }
 
+# Objective function ------------------------------------------------------
+
+ObjectiveFunction <- function(params, obs.data, offset, policy.function, lambda,
+                              hyperparams=list()) {
+  # Objective (risk) function for minimization problem. Includes regularization.
+  #
+  # Args:
+  #   params: Model parameters for policy.function -- are being changed
+  #           during minimization procedure.
+  #   treatment: Observed treatment values for patients.
+  #   covariates: Obseravation data of patients.
+  #   prop.scores: Correspond to observations in data.
+  #   reward: Precomputed reward values of treatment treatment.
+  #           The greater reward, the better.
+  #   offset: Smallest value of difference between
+  #           observational treatment value and the predicted one,
+  #           which is interpeted as full "1" loss
+  #   policy.function: Decision function of the form function(params, data, ...)
+  #                    which returns treatment given covariates.
+  #   lambda: Regularization parameter.
+  #   hyperparams:  list of hyperparameters for policy function
+  #
+  # Returns:
+  #   Regularized risk function of DTR specified with policy.function.
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  loss <- pmin(abs(obs.data$treatment - prediction) / offset, 1)
+  denominator <- obs.data$prop.scores * (2 * offset)
+  risk.function.value <- mean(obs.data$raw.reward * loss / denominator)
+  # tail is because we dont penalize intercept parameter
+  regularization.value <- lambda * sum(tail(params, -1) ** 2)
+  return(risk.function.value + regularization.value)
+}
 
 
 
@@ -368,3 +475,4 @@ DCTargetFunction <- function(next.params, prev.params, obs.data, offset,
   regularization.value <- 0.5 * lambda * sum(tail(next.params, -1) ** 2)
   return(risk.func.value + regularization.value) 
 }
+

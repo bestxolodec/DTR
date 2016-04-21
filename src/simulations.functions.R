@@ -1,6 +1,7 @@
-source("./src/functions.R")
+source("./functions.R")
 library(doParallel)
 library(caret)
+library(reshape2)
 
 
 # Optimal policy functions ------------------------------------------------
@@ -67,10 +68,7 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
 # covariates should already contain or not intercept
 OptimizeParamsOfPolicyFunction <- function(obs.data, offset, policy.function, lambda,
                                            hyperparams=list(), opt.hyperparams=list()) {
-  regression.model <- lm(obs.data$treatment ~ obs.data$covariates - 1, model=T, x=T)
-  # TODO: Find out what to do with NA after regression
-  initial.params <- regression.model$coefficients
-  initial.params <- replace(initial.params, is.na(initial.params), 0)
+  init.pars <- opt.hyperparams$init.pars
   if (isTRUE("obj.func"  %in% names(opt.hyperparams))) {
     number.of.params <- ncol(obs.data$covariates)
     lower.params.threshold <- rep(-100, number.of.params)
@@ -83,7 +81,7 @@ OptimizeParamsOfPolicyFunction <- function(obs.data, offset, policy.function, la
         obs.data, offset, policy.function, lambda)
     params  <- optimized$par
   } else if (isTRUE("opt.func"  %in% names(opt.hyperparams))) {
-    params <- opt.hyperparams$opt.func(params=initial.params, obs.data,  
+    params <- opt.hyperparams$opt.func(params=init.pars, obs.data,  
                                        offset, policy.function, lambda, 
                                        hyperparams=hyperparams,
                                        opt.hyperparams=opt.hyperparams)
@@ -137,6 +135,34 @@ PlotDecsionsVersusObserved <- function(obs.data, policy.function, params, offset
   abline(0, 1)  
   abline(offset, 1, col = "blue", lty = 2)  
   abline(-offset, 1, col = "blue", lty = 2)  
+}
+
+
+
+# GetSimulationInfo -------------------------------------------------------
+
+GetMetricsForParams  <- function(params, datasets, offset, policy.function, lambda) {
+  stat.list  <- list()
+  for(data.name in names(datasets)) {
+    d = datasets[[data.name]]
+    for (name  in names(params)) {
+      p = params[[name]] 
+      vf = ValueFunction(params = p, obs.data = d, offset = offset,  policy.function)
+      objf = ObjectiveFunction(params = p, obs.data = d, offset, policy.function, lambda)
+
+      pred = pmin(pmax(policy.function(p, d$covariates), 0),2)
+      optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(d$covariates))
+      value = mean(GetQfunctionValuesForFirstSimulation(
+                   covariates = as.data.frame(d$covariates),
+                   given.treatement = pred,
+                   optimal.treatment = optimal))
+
+      stat.list[[paste("VF", name, toupper(data.name), sep=".")]] = vf
+      stat.list[[paste("OBJF", name, toupper(data.name), sep=".")]] = objf
+      stat.list[[paste("Qfun", name, toupper(data.name), sep=".")]] = value
+    }
+  }
+return (t(as.matrix(stat.list)))
 }
 
 
