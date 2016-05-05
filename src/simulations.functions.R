@@ -124,14 +124,21 @@ GetDtrValuesOnFolds <- function(folds, obs.data, offset, control.offset,
 
 #  Plot decisions versus observed treatment  ------------------------------
 
+ScaleToZeroOne <- function(data) {
+  return ((data - min(data))  / (max(data) - min(data)))
+}
+
+
+
 PlotDecsionsVersusObserved <- function(obs.data, policy.function, params, offset,
-                                       title="DCA decisions versus observed"){
+                                       title="DCA decisions versus observed", highlihght=NULL){
   decision.values <- policy.function(params, obs.data$covariates)
   rewards.scaled.0.1 <- (obs.data$reward - min(obs.data$reward) ) / 
                         (max(obs.data$reward) - min(obs.data$reward))
   plot(decision.values, obs.data$treatment,
        col=rgb(1 - rewards.scaled.0.1, rewards.scaled.0.1, 0),
-       pch=20, main=title)
+       pch=19, main=title,  xlim = c(0,2), xlab="Predicted treatment", 
+       ylab="Observed treatment")
   abline(0, 1)  
   abline(offset, 1, col = "blue", lty = 2)  
   abline(-offset, 1, col = "blue", lty = 2)  
@@ -166,4 +173,142 @@ return (t(as.matrix(stat.list)))
 }
 
 
+
+
+
+
+rq.with.weights <- function (formula, tau = 0.5, data, subset, weights, na.action, 
+                             method = "br", model = TRUE, contrasts = NULL, ...) 
+{
+  call <- match.call()
+  mf <- match.call(expand.dots = FALSE)
+  m <- match(c("formula", "data", "subset", "weights", "na.action"), 
+             names(mf), 0)
+  mf <- mf[c(1, m)]
+  mf$drop.unused.levels <- TRUE
+  mf[[1]] <- as.name("model.frame")
+  mf <- eval.parent(mf)
+  if (method == "model.frame") 
+    return(mf)
+  mt <- attr(mf, "terms")
+  weights <- as.vector(model.weights(mf))
+  Y <- model.response(mf)
+  X <- model.matrix(mt, mf, contrasts)
+  eps <- .Machine$double.eps^(2/3)
+  Rho <- function(u, tau) u * (tau - (u < 0))
+  if (length(tau) > 1) {
+    print("assuming many taus!")
+    if (any(tau < 0) || any(tau > 1)) 
+      stop("invalid tau:  taus should be >= 0 and <= 1")
+    if (any(tau == 0)) 
+      tau[tau == 0] <- eps
+    if (any(tau == 1)) 
+      tau[tau == 1] <- 1 - eps
+    coef <- matrix(0, ncol(X), length(tau))
+    rho <- rep(0, length(tau))
+    fitted <- resid <- matrix(0, nrow(X), length(tau))
+    for (i in 1:length(tau)) {
+      z <- {
+        if (length(weights)) 
+          rq.wfit.with.weights(X, Y, tau = tau[i], weights, method, 
+                               ...)
+        else rq.fit(X, Y, tau = tau[i], method, ...)
+      }
+      coef[, i] <- z$coefficients
+      resid[, i] <- z$residuals
+      rho[i] <- sum(Rho(z$residuals, tau[i]))
+      fitted[, i] <- Y - z$residuals
+    }
+    taulabs <- paste("tau=", format(round(tau, 3)))
+    dimnames(coef) <- list(dimnames(X)[[2]], taulabs)
+    dimnames(resid) <- list(dimnames(X)[[1]], taulabs)
+    fit <- z
+    fit$coefficients <- coef
+    fit$residuals <- resid
+    fit$fitted.values <- fitted
+    if (method == "lasso") 
+      class(fit) <- c("lassorqs", "rqs")
+    else if (method == "scad") 
+      class(fit) <- c("scadrqs", "rqs")
+    else class(fit) <- "rqs"
+  }
+  else {
+    process <- (tau < 0 || tau > 1)
+    if (tau == 0) 
+      tau <- eps
+    if (tau == 1) 
+      tau <- 1 - eps
+    fit <- {
+      if (length(weights)) 
+        rq.wfit.with.weights(X, Y, tau = tau, weights, method, ...)
+      else rq.fit(X, Y, tau = tau, method, ...)
+    }
+    if (process) 
+      rho <- list(x = fit$sol[1, ], y = fit$sol[3, ])
+    else {
+      dimnames(fit$residuals) <- list(dimnames(X)[[1]], 
+                                      NULL)
+      rho <- sum(Rho(fit$residuals, tau))
+    }
+    if (method == "lasso") 
+      class(fit) <- c("lassorq", "rq")
+    else if (method == "scad") 
+      class(fit) <- c("scadrq", "rq")
+    else class(fit) <- ifelse(process, "rq.process", "rq")
+  }
+  fit$na.action <- attr(mf, "na.action")
+  fit$formula <- formula
+  fit$terms <- mt
+  fit$xlevels <- .getXlevels(mt, mf)
+  fit$call <- call
+  fit$tau <- tau
+  fit$weights <- weights
+  fit$residuals <- drop(fit$residuals)
+  fit$rho <- rho
+  fit$method <- method
+  fit$fitted.values <- drop(fit$fitted.values)
+  attr(fit, "na.message") <- attr(m, "na.message")
+  if (model) 
+    fit$model <- mf
+  fit
+}
+
+
+
+rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...)  {
+  if (any(weights < 0)) 
+    stop("negative weights not allowed")
+  if (length(tau) > 1) {
+    tau <- tau[1]
+    warning("Multiple taus not allowed in rq.wfit: solution restricted to first element")
+  }
+  contr <- attr(x, "contrasts")
+  wx <- x * weights
+  wy <- y * weights
+  fit <- switch(method, fn = rq.fit.fnb(wx, wy, tau = tau,  ...), 
+                fnb = rq.fit.fnb(wx, wy, tau = tau, ...), 
+                br = rq.fit.br(wx,  wy, tau = tau, ...), 
+                fnc = rq.fit.fnc(wx, wy, tau = tau, ...), 
+                pfn = rq.fit.pfn(wx, wy, tau = tau, ...), { 
+                  what <- paste("rq.fit.", method, sep = "") 
+                    if (exists(what, mode = "function")) 
+                      (get(what, mode = "function"))(wx,  wy, tau, ...) 
+                    else stop(paste("unimplemented method:",  method)) 
+                  })
+  if (length(fit$sol)) 
+    fit$fitted.values <- x %*% fit$sol[-(1:3), ]
+  else fit$fitted.values <- x %*% fit$coef
+  fit$residuals <- y - fit$fitted.values
+  fit$contrasts <- attr(x, "contrasts")
+  fit$weights <- weights
+  fit
+}
+
+
+GetInitPars <- function(train, q=0.6) {
+  index = train$reward > quantile(train$reward, q)
+  rqmodel = rq(train$treatment[index] ~ train$covariates[index,] - 1, tau=.5, 
+               method="lasso", weights=train$reward[index], lambda = lambda)
+  return(coef(rqmodel))
+}
 
