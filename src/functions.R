@@ -391,14 +391,20 @@ DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
 
   
 
-GetOwlParams <-  function(data, lambda, q=.6, t=.5) {
+
+GetOwlParams <- function (data, lambda, weights=F, q = 0.6, t = 0.5) {
   constant = min(quantile(data$raw.reward, q), 0)
   data$weight = data$raw.reward - constant
-  index = which(data$raw.reward  > quantile(data$raw.reward, q))
-  rqmodel = rq(data$treatment[index] ~ data$covariates[index,] - 1, tau=t, 
-               method="lasso", weights=data$weight[index], lambda = lambda)
+  index = which(data$raw.reward > quantile(data$raw.reward, q))
+  if (weights) {
+    rqmodel = rq.with.weights(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, 
+                              method = "lasso", weights = data$weight[index], lambda = lambda)
+  } else {
+    rqmodel = rq(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, method = "lasso", 
+                 weights = data$weight[index], lambda = lambda)
+  }
   coefs = coef(rqmodel)
-  return (matrix(coefs))
+  return(matrix(coefs))
 }
 
 
@@ -534,22 +540,88 @@ MeshalkinObjFunc.grad.2max <- function(...) {- MeshalkinObjFunc.grad(...)}
 MeshalkinObjFunc.hess.2max <- function(...) {- MeshalkinObjFunc.hess(...)}
 
 
-NROptimizeMeshalkinGain <- function (params, obs.data,  offset, policy.function, lambda, 
-                                     hyperparams=list(), opt.hyperparams=list()) {
-  default.list <- list(use.hessian=TRUE)
-  opt.hyperparams <- modifyList(default.list, opt.hyperparams)
-  if (opt.hyperparams$use.hessian) {
-    res <- maxNR(MeshalkinObjFunc.2max, grad=MeshalkinObjFunc.grad.2max, start=opt.hyperparams$init.pars, 
-                 obs.data=train,  offset=offset, policy.function=policy.function, lambda_reg=lambda) 
-  } else {
-    res <- maxNR(MeshalkinObjFunc.2max, grad=MeshalkinObjFunc.grad.2max, hess=MeshalkinObjFunc.hess.2max, 
-                 start=opt.hyperparams$init.pars, 
-                 obs.data=train,  offset=offset, policy.function=policy.function, lambda_reg=lambda) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Cauchy loss function ----------------------------------------------------
+
+CauchyLoss <- function(u, c=1) {
+  return (c / 2 * log(1  + (u / c) ^ 2)) 
+}    
+
+CauchyLoss.grad <- function(u, c=1) {
+  return (u  /  (1 + (u / c) ^ 2))
+}    
+
+CauchyLoss.hess <- function(u, c=1) {
+  return  ((1 - (u / c) ^ 2)  /  (1 + (u / c)^2)^2)
+}  
+
+# WARN: Using only 
+# TODO: Decide what to use here: reward or raw reward ? 
+CauchyObjFunc <- function(params, obs.data,  offset, policy.function, lambda_reg, hyperparams=list()) { 
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  deviance <- obs.data$treatment - prediction
+  loss <- CauchyLoss(deviance, offset)
+  return(mean(obs.data$reward * loss / obs.data$prop.scores / offset)  + lambda_reg * params %*% params )
+}
+
+CauchyObjFunc.grad <- function(params, obs.data,  offset, policy.function, lambda_reg, hyperparams=list()) { 
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  deviance <- obs.data$treatment - prediction
+  loss <- CauchyLoss.grad(deviance, offset)
+  obj.func.coefs <- obs.data$reward * loss / obs.data$prop.scores / offset 
+  obj.func.value <-  colMeans(
+    Diagonal(n=NROW(obj.func.coefs), x=obj.func.coefs) %*% (-obs.data$covariates)
+  )
+  return(obj.func.value  + 2 * lambda_reg * params)
+}
+
+
+CauchyObjFunc.hess <- function(params, obs.data,  offset, policy.function, lambda_reg, hyperparams=list()) { 
+  prediction <- policy.function(params, obs.data$covariates, hyperparams)
+  deviance <- obs.data$treatment - prediction
+  loss <- CauchyLoss.hess(deviance, offset)
+  obj.func.matrix <- obs.data$reward * loss / obs.data$prop.scores / offset
+  n <- length(obs.data$reward)
+  acc <- 0 
+  for (i in seq(1, n)) {
+    acc <- acc + obj.func.matrix[i] * obs.data$covariates[i, ] %o% obs.data$covariates[i, ] 
   }
+  return(acc / n  + 2 * lambda_reg * diag(NCOL(obs.data$covariates)))
+}
+
+
+CauchyObjFunc.2max <- function(...) {- CauchyObjFunc(...)}
+CauchyObjFunc.grad.2max <- function(...) {- CauchyObjFunc.grad(...)}
+CauchyObjFunc.hess.2max <- function(...) {- CauchyObjFunc.hess(...)}
+
+
+
+
+# Newton Raphson optimization ---------------------------------------------
+
+
+
+NROptimize <- function (params, obs.data,  offset, policy.function, lambda,  
+                        hyperparams=list(), opt.hyperparams=list()) {
+  res <- maxNR(opt.hyperparams$func, grad=opt.hyperparams$func.grad,  
+               hess=opt.hyperparams$hess, start=opt.hyperparams$init.pars, 
+               obs.data=train,offset=offset, policy.function=policy.function, lambda_reg=lambda) 
   cat("Code: ", res$code, " Message: ", res$message, "\n")
   return (res$estimate)
 } 
-
 
 
 

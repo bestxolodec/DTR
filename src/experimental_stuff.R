@@ -223,6 +223,11 @@ library(maxLik)
 
 xspace <-  seq(-10, 10, 0.01)
 
+
+lossf <- function(u, offset=1) {
+  return (log(1 + exp(-u)))
+}
+
 lossf <- function(u, offset=1) {
   return (1 - exp(-u**2 / offset))
 }
@@ -237,7 +242,7 @@ lossf_hess <- function(u, offset=1) {
 
 
 
-plot(xspace, neg_lossf(xspace), type="l")
+plot(xspace, lossf(xspace, 10), type="l")
 plot(xspace, lossf_diff(xspace), type="l", ylim=c(-2.5,2.5))
 plot(xspace, lossf_hess(xspace), type="l")
 
@@ -254,12 +259,15 @@ lines(init.pars, neg_lossf(init.pars), type="l")
 plot(init.pars, neg_lossf_diff(init.pars))
 plot(init.pars, neg_lossf_hess(init.pars))
 
+
+
+
 for (i in seq(-10, 10, 0.1)) {
   res <- maxNR(neg_lossf, grad=neg_lossf_diff, hess=neg_lossf_hess,  start=i, control=list(steptol=1e-20))
   cat("For initial ", i , " Maximum = ", res$maximum, "\n")
 }
 
-
+maxNR(neg_lossf, grad=neg_lossf_diff, hess=neg_lossf_hess,  start=0.5, control=list(steptol=1e-20))
 
 
 
@@ -383,4 +391,38 @@ A <- matrix(c(1, 1), 1, 2)
 B <- -1
 res <- maxNR(hatf, start=c(0,0), constraints=list(eqA=A, eqB=B),
              control=list(printLevel=1))
-print(summary(res)
+print(summary(res))
+      
+      
+      
+
+
+
+xspace <- seq(-10, 10, length.out = 1000)
+c = seq(0.001, 20, length.out = 20)      
+CauchyGain <- function(x, c) {
+  return (c / 2 * log(1  + (x / c) ^ 2 )) 
+}      
+plot(xspace, CauchyLoss(xspace, tail(c, 1)), type="l")
+for (ci  in c) {
+  lines(xspace, CauchyLoss(xspace, ci))
+}
+
+
+plot(xspace, CauchyGain(xspace, head(tail(c, 3), 1)), type="l")
+plot(xspace, CauchyGain(xspace, .1), type="l")
+plot(xspace, CauchyGain(xspace, .03), type="l")
+plot(xspace, CauchyGain(xspace, .004), type="l")
+plot(xspace, CauchyGain(xspace, .100), type="l")
+
+
+
+
+
+
+
+
+
+
+      
+      
