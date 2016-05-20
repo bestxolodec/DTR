@@ -148,32 +148,46 @@ PlotDecsionsVersusObserved <- function(obs.data, policy.function, params, offset
 
 # GetSimulationInfo -------------------------------------------------------
 
+
+QFunctionFirstScenario <- function(params, data, policy.function) {
+  pred = pmin(pmax(policy.function(params, data$covariates), 0),2)
+  optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
+  value = mean(GetQfunctionValuesForFirstSimulation(
+               covariates = as.data.frame(data$covariates),
+               given.treatement = pred,
+               optimal.treatment = optimal))
+  return (value)
+}
+
+
 GetMetricsForParams  <- function(params, datasets, offset, policy.function, lambda) {
   stat.list  <- list()
   for(data.name in names(datasets)) {
     d = datasets[[data.name]]
     for (name  in names(params)) {
       p = params[[name]] 
+      
       vf = ValueFunction(params = p, obs.data = d, offset = offset,  policy.function)
       objf = ObjectiveFunction(params = p, obs.data = d, offset, policy.function, lambda)
-
-      pred = pmin(pmax(policy.function(p, d$covariates), 0),2)
-      optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(d$covariates))
-      value = mean(GetQfunctionValuesForFirstSimulation(
-                   covariates = as.data.frame(d$covariates),
-                   given.treatement = pred,
-                   optimal.treatment = optimal))
+      qf = QFunctionFirstScenario(p, d, policy.function)
 
       stat.list[[paste("VF", name, toupper(data.name), sep=".")]] = vf
       stat.list[[paste("OBJF", name, toupper(data.name), sep=".")]] = objf
-      stat.list[[paste("Qfun", name, toupper(data.name), sep=".")]] = value
+      stat.list[[paste("Qfun", name, toupper(data.name), sep=".")]] = qf
     }
   }
 return (t(as.matrix(stat.list)))
 }
 
 
-
+# QFunctionSecondScenario <- function(params, data, offset, policy.function, lambda) {
+#   pred = pmin(pmax(policy.function(p, data$covariates), 0),2)
+#   optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
+#   value = mean(GetQfunctionValuesForFirstSimulation(
+#                covariates = as.data.frame(d$covariates),
+#                given.treatement = pred,
+#                optimal.treatment = optimal))
+# }
 
 
 
@@ -305,10 +319,5 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
 }
 
 
-GetInitPars <- function(train, q=0.6) {
-  index = train$reward > quantile(train$reward, q)
-  rqmodel = rq(train$treatment[index] ~ train$covariates[index,] - 1, tau=.5, 
-               method="lasso", weights=train$reward[index], lambda = lambda)
-  return(coef(rqmodel))
-}
+
 

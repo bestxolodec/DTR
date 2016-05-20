@@ -138,6 +138,7 @@ GaussKernel <- function(X, gamma) {
 }
 
 
+
 PolicyFunGaussKernel <- function(params, patient.covariates,
                                  hyperparams=list(gamma=0.1), ...) {
   # Make decision for patient treatment based on Gauss kernels
@@ -152,7 +153,6 @@ PolicyFunGaussKernel <- function(params, patient.covariates,
   #   indexies of patient.covariates.
   return (GaussKernel(patient.covariates, hyperparams$gamma) %*% params)
 }
-
 
 
 
@@ -392,20 +392,6 @@ DCOptimizeL1Penalized <- function(params=NULL, obs.data, offset,
   
 
 
-GetOwlParams <- function (data, lambda, weights=F, q = 0.6, t = 0.5) {
-  constant = min(quantile(data$raw.reward, q), 0)
-  data$weight = data$raw.reward - constant
-  index = which(data$raw.reward > quantile(data$raw.reward, q))
-  if (weights) {
-    rqmodel = rq.with.weights(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, 
-                              method = "lasso", weights = data$weight[index], lambda = lambda)
-  } else {
-    rqmodel = rq(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, method = "lasso", 
-                 weights = data$weight[index], lambda = lambda)
-  }
-  coefs = coef(rqmodel)
-  return(matrix(coefs))
-}
 
 
 
@@ -626,3 +612,29 @@ NROptimize <- function (params, obs.data,  offset, policy.function, lambda,
 
 
 
+
+
+# OWL parameters from paper -----------------------------------------------
+
+GetOwlParams <- function (data, lambda, weights=F, q = 0.6, t = 0.5, ...) {
+  constant = min(quantile(data$raw.reward, q), 0)
+  data$weight = data$raw.reward - constant
+  index = which(data$raw.reward > quantile(data$raw.reward, q))
+  if (weights) {
+    rqmodel = rq.with.weights(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, 
+                              method = "lasso", weights = data$weight[index], lambda = lambda)
+  } else {
+    rqmodel = rq(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, method = "lasso", 
+                 weights = data$weight[index], lambda = lambda)
+  }
+  coefs = coef(rqmodel)
+  return(matrix(coefs))
+}
+
+
+GetInitPars <- function(train, q=0.6, ...) {
+  index = train$reward > quantile(train$reward, q)
+  rqmodel = rq(train$treatment[index] ~ train$covariates[index,] - 1, tau=.5, 
+               method="lasso", weights=train$reward[index], lambda = lambda)
+  return(coef(rqmodel))
+}
