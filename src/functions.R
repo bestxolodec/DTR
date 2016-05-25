@@ -631,7 +631,8 @@ GetOwlParams <- function (data, lambda, weights=F, q = 0.6, t = 0.5, ...) {
   return(matrix(coefs))
 }
 
-
+# Nearly the same as  GetOwlParams but always without weigths 
+# and without making zero weight as the minimal of (1-q) upper reward ceofficients
 GetInitPars <- function(train, q=0.6, ...) {
   index = train$reward > quantile(train$reward, q)
   rqmodel = rq(train$treatment[index] ~ train$covariates[index,] - 1, tau=.5, 
