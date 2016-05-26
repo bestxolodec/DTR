@@ -470,6 +470,9 @@ DCTargetFunction <- function(next.params, prev.params, obs.data, offset,
 
 
 
+# TODO: If another loss function would be needed, 
+#       rewrite objective function definition as abstract independent of 
+#       particular loss function. 
 # Newton Raphson optimization of Meshalkin function -----------------------
 
 TriangularLoss <- function (u, offset) {
@@ -495,8 +498,8 @@ MeshalkinObjFunc <- function(params, obs.data,  offset, policy.function, lambda_
   prediction <- policy.function(params, obs.data$covariates, hyperparams)
   deviance <- obs.data$treatment - prediction
   loss <- MeshalkinLoss(deviance, offset = offset)
-  return(mean(obs.data$reward * loss / obs.data$prop.scores / offset)  + lambda_reg * params %*% params )
-}
+  return(mean(obs.data$reward * loss / obs.data$prop.scores / offset)  + lambda_reg * sum(params[-1] ** 2))
+} 
 
 MeshalkinObjFunc.grad <- function(params, obs.data,  offset, policy.function, lambda_reg, hyperparams=list()) { 
   prediction <- policy.function(params, obs.data$covariates, hyperparams)
@@ -504,7 +507,8 @@ MeshalkinObjFunc.grad <- function(params, obs.data,  offset, policy.function, la
   loss <- MeshalkinLoss.grad(deviance, offset = offset)
   obj.func.coefs <- obs.data$reward * loss / obs.data$prop.scores / offset 
   obj.func.value <-  colMeans(Diagonal(n=NROW(obj.func.coefs), x=obj.func.coefs) %*% (-obs.data$covariates))
-  return(obj.func.value  + 2 * lambda_reg * params)
+  non.intercept.mask <- c(0, rep(1, length(params) - 1))
+  return(obj.func.value  + 2 * lambda_reg * params * non.intercept.mask)
 }
 
 
@@ -518,24 +522,13 @@ MeshalkinObjFunc.hess <- function(params, obs.data,  offset, policy.function, la
   for (i in seq(1, n)) {
     acc <- acc + obj.func.matrix[i] * obs.data$covariates[i, ] %o% obs.data$covariates[i, ] 
   }
-  return(acc / n  + 2 * lambda_reg * diag(NCOL(obs.data$covariates)))
+  non.intercept.mask <- c(0, rep(1, length(params) - 1))
+  return(acc / n  + 2 * lambda_reg * diag(length(params)) * non.intercept.mask)
 }
 
 MeshalkinObjFunc.2max <- function(...) {- MeshalkinObjFunc(...)}
 MeshalkinObjFunc.grad.2max <- function(...) {- MeshalkinObjFunc.grad(...)}
 MeshalkinObjFunc.hess.2max <- function(...) {- MeshalkinObjFunc.hess(...)}
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -551,7 +544,7 @@ CauchyLoss.grad <- function(u, c=1) {
 }    
 
 CauchyLoss.hess <- function(u, c=1) {
-  return  ((1 - (u / c) ^ 2)  /  (1 + (u / c)^2)^2)
+  return  ((1 - (u / c) ^ 2)  /  (1 + (u / c) ^ 2) ^ 2)
 }  
 
 # WARN: Using only 
@@ -560,9 +553,9 @@ CauchyObjFunc <- function(params, obs.data,  offset, policy.function, lambda_reg
   prediction <- policy.function(params, obs.data$covariates, hyperparams)
   deviance <- obs.data$treatment - prediction
   loss <- CauchyLoss(deviance, offset)
-  return(mean(obs.data$reward * loss / obs.data$prop.scores / offset)  + lambda_reg * params %*% params )
+  return(mean(obs.data$reward * loss / obs.data$prop.scores / offset)  + lambda_reg * sum(params[-1] ** 2 ))
 }
-
+  
 CauchyObjFunc.grad <- function(params, obs.data,  offset, policy.function, lambda_reg, hyperparams=list()) { 
   prediction <- policy.function(params, obs.data$covariates, hyperparams)
   deviance <- obs.data$treatment - prediction
@@ -571,7 +564,8 @@ CauchyObjFunc.grad <- function(params, obs.data,  offset, policy.function, lambd
   obj.func.value <-  colMeans(
     Diagonal(n=NROW(obj.func.coefs), x=obj.func.coefs) %*% (-obs.data$covariates)
   )
-  return(obj.func.value  + 2 * lambda_reg * params)
+  non.intercept.mask <- c(0, rep(1, length(params) - 1))
+  return(obj.func.value  + 2 * lambda_reg * params * non.intercept.mask)
 }
 
 
@@ -585,7 +579,8 @@ CauchyObjFunc.hess <- function(params, obs.data,  offset, policy.function, lambd
   for (i in seq(1, n)) {
     acc <- acc + obj.func.matrix[i] * obs.data$covariates[i, ] %o% obs.data$covariates[i, ] 
   }
-  return(acc / n  + 2 * lambda_reg * diag(NCOL(obs.data$covariates)))
+  non.intercept.mask <- c(0, rep(1, length(params) - 1))
+  return(acc / n  + 2 * lambda_reg * diag(length(params)) * non.intercept.mask)
 }
 
 
@@ -598,8 +593,6 @@ CauchyObjFunc.hess.2max <- function(...) {- CauchyObjFunc.hess(...)}
 
 # Newton Raphson optimization ---------------------------------------------
 
-
-
 NROptimize <- function (params, obs.data,  offset, policy.function, lambda,  
                         hyperparams=list(), opt.hyperparams=list()) {
   res <- maxNR(opt.hyperparams$func, grad=opt.hyperparams$func.grad,  
@@ -608,9 +601,6 @@ NROptimize <- function (params, obs.data,  offset, policy.function, lambda,
   cat("Code: ", res$code, " Message: ", res$message, "\n")
   return (res$estimate)
 } 
-
-
-
 
 
 
@@ -638,4 +628,11 @@ GetInitPars <- function(train, q=0.6, ...) {
   rqmodel = rq(train$treatment[index] ~ train$covariates[index,] - 1, tau=.5, 
                method="lasso", weights=train$reward[index], lambda = lambda)
   return(coef(rqmodel))
+}
+
+
+GetDCOwlParam <- function (obs.data, lambda, offset, init.pars){
+  coefs <- coef(dc_loop(obs.data$covariates[, -1], obs.data$treatment, obs.data$reward, 
+                        offset, lambda, init.pars[-1], init.pars[1]))
+  return (coefs)
 }

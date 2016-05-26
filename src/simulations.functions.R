@@ -159,6 +159,14 @@ QFunctionFirstScenario <- function(params, data, policy.function) {
   return (value)
 }
 
+# QFunctionSecondScenario <- function(params, data, offset, policy.function, lambda) {
+#   pred = pmin(pmax(policy.function(p, data$covariates), 0),2)
+#   optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
+#   value = mean(GetQfunctionValuesForFirstSimulation(
+#                covariates = as.data.frame(d$covariates),
+#                given.treatement = pred,
+#                optimal.treatment = optimal))
+# }
 
 GetMetricsForParams  <- function(params, datasets, offset, policy.function, lambda) {
   stat.list  <- list()
@@ -180,15 +188,32 @@ return (t(as.matrix(stat.list)))
 }
 
 
-# QFunctionSecondScenario <- function(params, data, offset, policy.function, lambda) {
-#   pred = pmin(pmax(policy.function(p, data$covariates), 0),2)
-#   optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
-#   value = mean(GetQfunctionValuesForFirstSimulation(
-#                covariates = as.data.frame(d$covariates),
-#                given.treatement = pred,
-#                optimal.treatment = optimal))
-# }
 
+GetScoreForEachParamSet <- function(hyp.grid, opt.fname, opt.fparams, 
+  score.func=function(p) QFunctionFirstScenario(p, data=test, policy.function=PolicyFunLinearKernel)) {
+  # Replaces necessary params in opt.fparams with row of hyp.grid; 
+  # Computes metrics using the score function with two pars: 
+  #   opt.result  and  replaced opt.fparams
+  # 
+  # Args:
+  #  score.func - Function to call with result of opt.fname( ) invocation with updated params from hyp.grid.
+  #               Should have signature  score.func(opt.result, opt.modified.params)
+  opt.results = list()
+  stat.list = list()
+  for (i in seq_len(NROW(hyp.grid))) {
+    opt.modified.params = as.list(modifyList(opt.fparams, hyp.grid[i, , drop=F]))
+    param.name = paste(paste(names(hyperparams.grid),  hyp.grid[i, ], sep="="), collapse = ".")
+    opt.results[[i]] <- do.call(opt.fname, opt.modified.params)
+    stat.list[[i]] <-  score.func(opt.results[[i]])
+  } 
+  return (unlist(stat.list))
+}
+
+
+
+
+
+# Quantile regression from quantreg hacked to support weights -------------
 
 
 rq.with.weights <- function (formula, tau = 0.5, data, subset, weights, na.action, 
@@ -317,6 +342,10 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
   fit$weights <- weights
   fit
 }
+
+
+
+# Score function ----------------------------------------------------------
 
 
 
