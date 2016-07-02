@@ -12,6 +12,18 @@ GetOptimalDecisionsForFirstSimulation <- function(covariates) {
   return(as.matrix(1 + 0.5 * covariates$V1 + 0.5 * covariates$V2))
 }
 
+GetOptimalDecisionsForSecondSimulation <- function(covariates) {
+  stopifnot(is.data.frame(covariates))
+  stopifnot("V1" %in% names(covariates))
+  return (with(data = covariates, expr = {  
+      Iv1 <-  (-0.5 < V1)  & (V1 < 0.5) 
+      as.matrix(0.6 * Iv1 + 1.2 * (!Iv1)   + V4 ** 2 + 0.5 * log(abs(V7) + 1) - 0.6)
+    })
+  )
+}
+
+
+
 
 # Q functions  ------------------------------------------------------------
 
@@ -20,6 +32,18 @@ GetQfunctionValuesForFirstSimulation <- function(covariates, given.treatement, o
   non.linear.part <- - 25 * (optimal.treatment - given.treatement) ** 2
   return (linear.part + non.linear.part)
 }
+
+GetQfunctionValuesForSecondSimulation <- function(covariates, given.treatement, optimal.treatment) {
+  return(with(as.data.frame(covariates), {
+    8 + 4 * cos(2 * pi * V2) - 2 * V4 - 8 * V5 ^ 3  - 15 * abs(optimal.treatment - given.treatement)
+  }))
+}
+
+GetQValue <- function(params, data, policy.function) {
+  pred = pmin(pmax(policy.function(params, data$covariates), 0),2)
+  return (with(data, { mean(GetQfunctionValues(covariates, pred, optimal.treatment)) }))
+}
+
 
 
 # RewardFunctions ---------------------------------------------------------
@@ -33,20 +57,33 @@ GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1
 }
 
 
-# Get Data List -----------------------------------------------------------
+#  GetSimulationData ----------------------------------------------------------
 
-GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T) {
+GetSimulationData <- function(sample.size, number.of.covariates, 
+                              scenario="chen.1", add.intercept=T) {
   covariates <- matrix(runif(sample.size * number.of.covariates, min=-1, max=1),
                        ncol=number.of.covariates)
   if (isTRUE(add.intercept)) {
     covariates <- model.matrix( ~ ., as.data.frame(covariates))
   }
   treatment <- matrix(runif(sample.size, min=0, max=2), ncol=1)
-  optimal.treatment <- GetOptimalDecisionsForFirstSimulation(as.data.frame(covariates))
-  q.function.values <- GetQfunctionValuesForFirstSimulation(
+  
+  GetOptimalDecisions <- switch (scenario,
+    "chen.1" = GetOptimalDecisionsForFirstSimulation,
+    "chen.2" = GetOptimalDecisionsForSecondSimulation
+  )
+  GetQFunctionValues <- switch (scenario,
+    "chen.1" = GetQfunctionValuesForFirstSimulation,
+    "chen.2" = GetQfunctionValuesForSecondSimulation
+  )
+  
+  optimal.treatment <- GetOptimalDecisions(as.data.frame(covariates))
+  q.function.values <- GetQFunctionValues(
       covariates = as.data.frame(covariates),
       given.treatement =  treatment,
-      optimal.treatment = optimal.treatment)
+      optimal.treatment = optimal.treatment
+  )
+  
   reward.list <- GetRewardGivenQfunctionValuesAsMeanVec(q.function.values)
   stopifnot(is.list(reward.list))
   # FIXME: Find out how to propely estimate propensity scores
@@ -55,11 +92,14 @@ GetSimulationData <- function(sample.size, number.of.covariates, add.intercept=T
   #     balance.formula = formula (treatment ~ . - covars..Intercept. - 1),
   #     two.step = T)
   prop.scores <- rep(1, nrow(covariates))
-   return (
-     c(list(covariates=as.matrix(covariates), 
-            treatment=as.matrix(treatment),
-            prop.scores=as.matrix(prop.scores)), 
-       reward.list))
+  return (
+    c(list(covariates=as.matrix(covariates), 
+           treatment=as.matrix(treatment),
+           prop.scores=as.matrix(prop.scores),
+           optimal.treatment=optimal.treatment, 
+           GetQFunctionValues=GetQFunctionValues), 
+     reward.list)
+  )
 }
 
 
@@ -149,24 +189,7 @@ PlotDecsionsVersusObserved <- function(obs.data, policy.function, params, offset
 # GetSimulationInfo -------------------------------------------------------
 
 
-QFunctionFirstScenario <- function(params, data, policy.function) {
-  pred = pmin(pmax(policy.function(params, data$covariates), 0),2)
-  optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
-  value = mean(GetQfunctionValuesForFirstSimulation(
-               covariates = as.data.frame(data$covariates),
-               given.treatement = pred,
-               optimal.treatment = optimal))
-  return (value)
-}
 
-# QFunctionSecondScenario <- function(params, data, offset, policy.function, lambda) {
-#   pred = pmin(pmax(policy.function(p, data$covariates), 0),2)
-#   optimal = GetOptimalDecisionsForFirstSimulation(as.data.frame(data$covariates))
-#   value = mean(GetQfunctionValuesForFirstSimulation(
-#                covariates = as.data.frame(d$covariates),
-#                given.treatement = pred,
-#                optimal.treatment = optimal))
-# }
 
 GetMetricsForParams  <- function(params, datasets, offset, policy.function, lambda) {
   stat.list  <- list()
@@ -177,7 +200,7 @@ GetMetricsForParams  <- function(params, datasets, offset, policy.function, lamb
       
       vf = ValueFunction(params = p, obs.data = d, offset = offset,  policy.function)
       objf = ObjectiveFunction(params = p, obs.data = d, offset, policy.function, lambda)
-      qf = QFunctionFirstScenario(p, d, policy.function)
+      qf = GetQValue(p, d, policy.function)
 
       stat.list[[paste("VF", name, toupper(data.name), sep=".")]] = vf
       stat.list[[paste("OBJF", name, toupper(data.name), sep=".")]] = objf
