@@ -183,6 +183,79 @@ GetNextStepParams  <- function(covars, treatment, relative.weights, lambda) {
   return (as.numeric(c(b.next, w.next)))
 }
 
+GetFuncMinWithMM <- function(init.pars, covars, treatment, weights, lambda, eps, tol) {
+  params <- init.pars
+  sequential.converged.iters <- 3
+  converged.iters <- 0
+  iteration <- 0
+  repeat {
+    iteration <- iteration + 1
+    prediction <- PolicyFunLinearKernel(params, covars)
+    abs.deviance <- abs(treatment - prediction)
+    if (is.null(eps)) {
+      stopifnot(sum(abs.deviance < 1e-17) == 0)
+      relative.weights <- weights / abs.deviance
+    } else {
+      relative.weights <- 2 * weights ** 2 / (eps + 2 * weights * abs.deviance)
+    }
+    next.params <- GetNextStepParams(covars, treatment, relative.weights, lambda)
+    discrepancy <- sum((next.params - params) ** 2)
+    if(discrepancy < tol) {
+      if (converged.iters == sequential.converged.iters) {
+        break 
+      } else {
+        converged.iters <-  converged.iters + 1
+      }
+    } else {
+      converged.iters <- 0
+    }
+    params <- next.params
+  }
+  # cat("MM converged after ", iteration - sequential.converged.iters, " iterations\n")
+  return (next.params)
+}
+
+
+
+## TODO: Possible improvements in first coefs gessing with an lm model
+DCOptimizeWithMML2PenalizedProperIters <- function(params=NULL, obs.data, offset,
+    policy.function, lambda, hyperparams=list(), 
+    opt.hyperparams=list()) {
+  default.list <- list(debug.file=NULL, approximation.eps=NULL, tolerance=1e-6, q=0.65)
+  opt.hyperparams <- modifyList(default.list, opt.hyperparams)
+  stopifnot(is.matrix(obs.data$covariates))
+  stopifnot(! is.null(params))
+  t.params <- params
+  iteration <- 0
+  t.prev.Q.values <- rep(0, length(obs.data$treatment))
+  repeat {
+    iteration <- iteration + 1
+    if (iteration > 1000) {
+      stop("Infinite iterations (more than 1000) of DC algorithm!")
+    }
+    t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
+    t.abs.deviance.from.treatment <- abs(obs.data$treatment - t.prediction)
+    t.Q.values <- ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
+    if (all(t.prev.Q.values == t.Q.values))  {
+     break 
+    }
+    t.weights <- obs.data$reward * t.Q.values / (offset ** 2) / obs.data$prop.scores
+    t.params <- GetFuncMinWithMM(t.params, obs.data$covariates, 
+                                 obs.data$treatment, t.weights,  
+                                 lambda, opt.hyperparams$approximation.eps, 
+                                 opt.hyperparams$tolerance)
+    t.prev.Q.values <- t.Q.values
+  }
+  return(t.params)
+}
+
+
+
+
+
+
+
+##################
 
 
 ## TODO: Possible improvements in first coefs gessing with an lm model
@@ -267,81 +340,9 @@ DCOptimizeWithMML2Penalized <- function(params=NULL, obs.data, offset,
 
 
 
-GetFuncMinWithMM <- function(init.pars, covars, treatment, weights, lambda, eps, tol) {
-  params <- init.pars
-  sequential.converged.iters <- 3
-  converged.iters <- 0
-  iteration <- 0
-  repeat {
-    iteration <- iteration + 1
-    prediction <- PolicyFunLinearKernel(params, covars)
-    abs.deviance <- abs(treatment - prediction)
-    stopifnot(sum(abs.deviance < 1e-17) == 0)
-    if (is.null(eps)) {
-      relative.weights <- weights / abs.deviance
-    } else {
-      relative.weights <- 2 * weights ** 2 / (eps + 2 * weights * abs.deviance)
-    }
-    next.params <- GetNextStepParams(covars, treatment, relative.weights, lambda)
-    discrepancy <- sum((next.params - params) ** 2)
-    if(discrepancy < tol) {
-      if (converged.iters == sequential.converged.iters) {
-        break 
-      } else {
-        converged.iters <-  converged.iters + 1
-      }
-    } else {
-      converged.iters <- 0
-    }
-    params <- next.params
-  }
-  # cat("MM converged after ", iteration - sequential.converged.iters, " iterations\n")
-  return (next.params)
-}
 
-## TODO: Possible improvements in first coefs gessing with an lm model
-DCOptimizeWithMML2PenalizedProperIters <- function(params=NULL, obs.data, offset,
-    policy.function, lambda, hyperparams=list(), 
-    opt.hyperparams=list()) {
-  default.list <- list(debug.file=NULL, approximation.eps=NULL, tolerance=1e-6, q=0.65)
-  opt.hyperparams <- modifyList(default.list, opt.hyperparams)
-  stopifnot(is.matrix(obs.data$covariates))
-  stopifnot(! is.null(params))
-  t.params <- params
-  # if (is.null(params)) {
-  #   
-  #   index = obs.data$reward > quantile(obs.data$reward, opt.hyperparams$q) 
-  #   rqmodel = rq(obs.data$treatment[index] ~ obs.data$covariates[index,] - 1, tau=.5, 
-  #                method="lasso", weights=obs.data$reward[index], lambda = 1)
-  #   t.params = coef(rqmodel) 
-  #   cat("GENERATE initial approximation of decision!\n")
-  # } else {
-  #   cat("Setting supplied params!\n")
-  #   t.params <- params
-  # }
-  iteration <- 0
-  t.prev.Q.values <- rep(0, length(obs.data$treatment))
-  repeat {
-    iteration <- iteration + 1
-    if (iteration > 1000) {
-      stop("Infinite iterations (more than 1000) of DC algorithm!")
-    }
-    t.prediction <- policy.function(t.params, obs.data$covariates, hyperparams)
-    t.abs.deviance.from.treatment <- abs(obs.data$treatment - t.prediction)
-    t.Q.values <- ifelse(t.abs.deviance.from.treatment <= offset, 1, 0)
-    if (sum(t.prev.Q.values !=  t.Q.values) == 0)  {
-     break 
-    }
-    t.weights <- obs.data$reward * t.Q.values / (offset ** 2) / obs.data$prop.scores
-    t.params <- GetFuncMinWithMM(t.params, obs.data$covariates, 
-                                 obs.data$treatment, t.weights,  
-                                 lambda, opt.hyperparams$approximation.eps, 
-                                 opt.hyperparams$tolerance)
-    t.prev.Q.values <- t.Q.values
-  }
-  cat("MML2PenalizedProperIters Converged after ", iteration, " iterations\n")
-  return(t.params)
-}
+
+
 
 
 
@@ -610,13 +611,10 @@ GetOwlParams <- function (data, lambda, weights=F, q = 0.6, t = 0.5, ...) {
   constant = min(quantile(data$raw.reward, q), 0)
   data$weight = data$raw.reward - constant
   index = which(data$raw.reward > quantile(data$raw.reward, q))
-  if (weights) {
-    rqmodel = rq.with.weights(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, 
-                              method = "lasso", weights = data$weight[index], lambda = lambda)
-  } else {
-    rqmodel = rq(data$treatment[index] ~ data$covariates[index, ] - 1, tau = t, method = "lasso", 
-                 weights = data$weight[index], lambda = lambda)
-  }
+  rq.func <- ifelse(weights, rq.with.weights, rq)
+  rqmodel = with(data, 
+    rq.func(treatment[index] ~ covariates[index, ] - 1, tau = t, 
+            method = "lasso", weights = weight[index], lambda = lambda))
   coefs = coef(rqmodel)
   return(matrix(coefs))
 }
@@ -630,9 +628,9 @@ GetInitPars <- function(train, q=0.6, ...) {
   return(coef(rqmodel))
 }
 
-
-GetDCOwlParam <- function (obs.data, lambda, offset, init.pars){
-  coefs <- coef(dc_loop(obs.data$covariates[, -1], obs.data$treatment, obs.data$reward, 
-                        offset, lambda, init.pars[-1], init.pars[1]))
-  return (coefs)
+# Using the Chen2016 approach
+GetDCLoopPars <- function(data, offset, lambda, init.pars) {
+  with(data, coef(dc_loop(covariates[, -1], treatment, reward, offset, 
+                          lambda, init.pars[-1], init.pars[1])))
 }
+

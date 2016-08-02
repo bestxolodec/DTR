@@ -11,3 +11,4 @@ DIPLOMA.Rproj
 *Icon*
 *.swp
 *.ipynb_checkpoints
+.RDataTmp

@@ -28,9 +28,11 @@ GetOptimalDecisionsForSecondSimulation <- function(covariates) {
 # Q functions  ------------------------------------------------------------
 
 GetQfunctionValuesForFirstSimulation <- function(covariates, given.treatement, optimal.treatment) {
-  linear.part <-  8 + 4 * covariates$V1 - 2 * covariates$V2 - 2 * covariates$V3
-  non.linear.part <- - 25 * (optimal.treatment - given.treatement) ** 2
-  return (linear.part + non.linear.part)
+  with(as.data.frame(covariates), {
+    linear.part <-  8 + 4 * V1 - 2 * V2 - 2 * V3
+    non.linear.part <- - 25 * (optimal.treatment - given.treatement) ** 2
+    return (linear.part + non.linear.part)
+  })
 }
 
 GetQfunctionValuesForSecondSimulation <- function(covariates, given.treatement, optimal.treatment) {
@@ -41,7 +43,7 @@ GetQfunctionValuesForSecondSimulation <- function(covariates, given.treatement, 
 
 GetQValue <- function(params, data, policy.function) {
   pred = pmin(pmax(policy.function(params, data$covariates), 0),2)
-  return (with(data, { mean(GetQfunctionValues(covariates, pred, optimal.treatment)) }))
+  return (with(data, { mean(GetQFunctionValues(covariates, pred, optimal.treatment)) }))
 }
 
 
@@ -59,15 +61,50 @@ GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1
 
 #  GetSimulationData ----------------------------------------------------------
 
-GetSimulationData <- function(sample.size, number.of.covariates, 
-                              scenario="chen.1", add.intercept=T) {
-  covariates <- matrix(runif(sample.size * number.of.covariates, min=-1, max=1),
-                       ncol=number.of.covariates)
-  if (isTRUE(add.intercept)) {
-    covariates <- model.matrix( ~ ., as.data.frame(covariates))
-  }
-  treatment <- matrix(runif(sample.size, min=0, max=2), ncol=1)
+
+# 
+# GenData.zhou.1 <- funciton(x)
+# 
+# A <- rbinom(sample.size, 1, 0.5)
+# 
+# 
+# sample.size <- 20 
+# n.of.covars <- 5
+# covariates <- matrix(runif(sample.size * n.of.covars, min=-1, max=1), ncol=n.of.covars)
+# treatment <- runif(sample.size, -1, 1)
+# mu <- with(as.data.frame(covariates), 1 + V1  + V2 + 2 * V3 +  0.5 * V4)
+# delta <- function(X) { with(as.data.frame(X), 1.8 *  (0.3 - V1 -  V2 )) } 
+# reward <- rnorm(sample.size, mean=mu + delta(covariates))
+# 
+# 
+# list(covariates=covariates, treatment=treatment, prop.scores=rep(1, sample.size), 
+#      optimal.treatment=?) 
+# 
+# 
+# 
+# n.of.grid.samples <- 100
+# grid.list <- list(V1 = seq(-1, 1, length.out = n.of.grid.samples),  
+#                   V2 = seq(-1, 1, length.out = n.of.grid.samples))
+# grid <- expand.grid(grid.list)
+# matrix(delta(covariates), ncol = sample.size)
+# with(grid.list, image(V1, V2, z = matrix(delta(grid), nrow=length(V1))))
+
+
+
+
+ 
+
+
+
+
+GetSimulationData <- function(sample.size,  scenario="chen.1", add.intercept=T) {
+  # if (grepl("^zhou", scenario)) {
+  #   return switch (scenario,
+  #     "zhou" = action
+  #   )
+  # }  
   
+  n.of.covars <- switch(scenario, "chen.1" = 30, "chen.2" = 10)
   GetOptimalDecisions <- switch (scenario,
     "chen.1" = GetOptimalDecisionsForFirstSimulation,
     "chen.2" = GetOptimalDecisionsForSecondSimulation
@@ -76,6 +113,14 @@ GetSimulationData <- function(sample.size, number.of.covariates,
     "chen.1" = GetQfunctionValuesForFirstSimulation,
     "chen.2" = GetQfunctionValuesForSecondSimulation
   )
+  
+  covariates <- matrix(runif(sample.size * n.of.covars, min=-1, max=1), 
+                       ncol=n.of.covars)
+  if (isTRUE(add.intercept)) {
+    covariates <- model.matrix( ~ ., as.data.frame(covariates))
+  }
+  treatment <- matrix(runif(sample.size, min=0, max=2), ncol=1)
+  
   
   optimal.treatment <- GetOptimalDecisions(as.data.frame(covariates))
   q.function.values <- GetQFunctionValues(
@@ -149,7 +194,7 @@ GetDtrValuesOnFolds <- function(folds, obs.data, offset, control.offset,
     control.obs.data <- list(
       covariates  = as.matrix(obs.data$covariates [control.fold, ]), 
       treatment   = as.matrix(obs.data$treatment  [control.fold, ]),
-      raw.reward      = as.matrix(obs.data$raw.reward [control.fold, ]),
+      raw.reward  = as.matrix(obs.data$raw.reward [control.fold, ]),
       prop.scores = as.matrix(obs.data$prop.scores[control.fold, ])
     )
     dtr.value <- ValueFunction(params = params,  obs.data = control.obs.data,  
@@ -207,7 +252,7 @@ GetMetricsForParams  <- function(params, datasets, offset, policy.function, lamb
       stat.list[[paste("Qfun", name, toupper(data.name), sep=".")]] = qf
     }
   }
-return (t(as.matrix(stat.list)))
+return  (unlist(stat.list)) 
 }
 
 
