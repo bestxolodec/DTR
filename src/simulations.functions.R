@@ -50,9 +50,9 @@ GetQValue <- function(params, data, policy.function) {
 
 # RewardFunctions ---------------------------------------------------------
 
-GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1,
+GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, sd=1,
                                                    only.positive=TRUE, eps=0.01) {
-  raw.reward <- rnorm(NROW(q.function.values), q.function.values, variance)
+  raw.reward <- rnorm(NROW(q.function.values), q.function.values, sd)
   reward <-  raw.reward - min(raw.reward) + eps
   return (list(raw.reward=as.matrix(raw.reward), 
                reward=as.matrix(reward)))
@@ -62,48 +62,103 @@ GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, variance=1
 #  GetSimulationData ----------------------------------------------------------
 
 
-# 
-# GenData.zhou.1 <- funciton(x)
-# 
 # A <- rbinom(sample.size, 1, 0.5)
-# 
 # 
 # sample.size <- 20 
 # n.of.covars <- 5
 # covariates <- matrix(runif(sample.size * n.of.covars, min=-1, max=1), ncol=n.of.covars)
 # treatment <- runif(sample.size, -1, 1)
 # mu <- with(as.data.frame(covariates), 1 + V1  + V2 + 2 * V3 +  0.5 * V4)
-# delta <- function(X) { with(as.data.frame(X), 1.8 *  (0.3 - V1 -  V2 )) } 
-# reward <- rnorm(sample.size, mean=mu + delta(covariates))
+# delta <- function(X) { with(as.data.frame(X), 0.4 *  (V2 - 0.25 * V1 ^ 2  - 1)) } 
+# Q.values <- rnorm(sample.size, mu)
 # 
+# ggg <- list(x = 1:5, y = 1:5, z = delta(grid))
 # 
-# list(covariates=covariates, treatment=treatment, prop.scores=rep(1, sample.size), 
-#      optimal.treatment=?) 
+# image(ggg)
 # 
-# 
-# 
-# n.of.grid.samples <- 100
-# grid.list <- list(V1 = seq(-1, 1, length.out = n.of.grid.samples),  
-#                   V2 = seq(-1, 1, length.out = n.of.grid.samples))
-# grid <- expand.grid(grid.list)
-# matrix(delta(covariates), ncol = sample.size)
-# with(grid.list, image(V1, V2, z = matrix(delta(grid), nrow=length(V1))))
+# grid <- expand.grid(V1 = seq(-1, 1, length.out = 100), 
+#                     V2 = seq(-1, 1, length.out = 100))
+
+
+Shvechikov.1.fopt <- function(x) {
+  step.start = 15
+  breakage.start = 40
+  first.part <- x**2  *  exp(- x**(.8)) +  (x - step.start) / 50 + .5
+  first.and.changed.part <- ( - x**1.9 / 900 + 6 *  sin(x/6) + 1.5 * (sin(x**1.01 ) + 1) * x**(1/7) )* 1/20 
+  second.part <-  (- first.part + first.and.changed.part) * (x > breakage.start)
+  whole <- first.part + second.part
+  f <- function(x) { # scaled Runge function
+    x <- x / 60   - 0.3
+    cos(3*pi*x)/(1+25*(x-0.25)^2) 
+  }
+  return ((whole + f(x)) / 2 + 0.35)
+} 
+
+Shvechikov.2.fopt <- function(x) {
+  return (((x - 50) / 50) ** 2)
+} 
+
+ReplaceExtremeWithUnif <- function(values, min.val, max.val){
+  violatros.index <- values < min.val | values > max.val
+  values[violatros.index] <- runif(sum(violatros.index), min = min.val, max=max.val)
+  return(values)
+}
+
+
+GetDataForSchvechikov.1 <- function(sample.size,  min.A=0, max.A=1, min.X=0, max.X=100, sd=NULL, noise=T) {
+  GetQFunctionValues <- function(covars, given.A, optimal.A) {
+    return (-(given.A - optimal.A) ** 2)
+  }
+  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X)
+  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
+  A.opt <-  Shvechikov.1.fopt(X)
+  Q.vals <-GetQFunctionValues(X, A, A.opt)
+  if (is.null(sd)) {
+    sd <- ifelse(noise, 1, 0)
+  }
+  R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
+  data <- list(covariates = X, treatment=A, optimal.treatment=A.opt, 
+               prop.scores = rep(1, sample.size))
+  data$GetQFunctionValues = GetQFunctionValues
+  data <- c(data, R.list)
+  data <- lapply(data, function(x)  {if (is.numeric(x)) as.matrix(x) else x} )
+  data$GetOptimalTreatment <- Shvechikov.1.fopt
+  return (data)
+}
+
+
+GetDataForSchvechikov.2 <- function(sample.size,  min.A=0, max.A=1, min.X=0, max.X=100, sd=NULL, noise=T) {
+  GetQFunctionValues <- function(covars, given.A, optimal.A) {
+    return (-(given.A - optimal.A) ** 2)
+  }
+  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X)
+  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
+  A.opt <-  Shvechikov.2.fopt(X)
+  Q.vals <-GetQFunctionValues(X, A, A.opt)
+  if (is.null(sd)) {
+    sd <- ifelse(noise, 1, 0)
+  }
+  R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
+  data <- list(covariates = X, treatment=A, optimal.treatment=A.opt, 
+               prop.scores = rep(1, sample.size))
+  data$GetQFunctionValues = GetQFunctionValues
+  data <- c(data, R.list)
+  data <- lapply(data, function(x)  {if (is.numeric(x)) as.matrix(x) else x} )
+  data$GetOptimalTreatment <- Shvechikov.2.fopt
+  return (data)
+}
 
 
 
 
- 
-
-
-
-
-GetSimulationData <- function(sample.size,  scenario="chen.1", add.intercept=T) {
-  # if (grepl("^zhou", scenario)) {
-  #   return switch (scenario,
-  #     "zhou" = action
-  #   )
-  # }  
+GetSimulationData <- function(sample.size,  scenario="chen.1", add.intercept=T, ...) {
   
+  if (grepl("shvechikov", scenario, ignore.case = T)) { 
+    return (switch (scenario,
+      "shvechikov.1" = GetDataForSchvechikov.1(sample.size = sample.size, ...), 
+      "shvechikov.2" = GetDataForSchvechikov.2(sample.size = sample.size, ...)
+    ))
+  }
   n.of.covars <- switch(scenario, "chen.1" = 30, "chen.2" = 10)
   GetOptimalDecisions <- switch (scenario,
     "chen.1" = GetOptimalDecisionsForFirstSimulation,
