@@ -1,0 +1,207 @@
+---
+title: "More sophisticated models. Comparison with KO-learning"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+local({
+  now = Sys.time()
+  knit_hooks$set(timeit = function(before) {
+    if (before) {
+      now <<- Sys.time()
+    } else {
+      paste("Cell took ", round(Sys.time() - now, 2), " sec")
+    }
+  })  
+})
+knitr::opts_chunk$set(cache=T, fig.path='/tmp/rmd_figs/', fig.width=10, fig.height=6,
+                      cache.path='/tmp/knitr_cache/)
+```
+
+
+
+
+# Deisgn X  and data generation
+
+```{r imports,  echo=FALSE, warning=FALSE, message=FALSE}
+library(tgp)
+library(ggplot2)
+library(data.table)
+library(gridExtra)
+library(lattice)
+setwd("../../src/")
+source("./simulations.functions.R")
+```
+
+
+
+Отладочные графики генерации данных для шума
+```{r}
+train <- GetSimulationData(1000, scenario = "shvechikov.1", sd=0.0)
+curve(Shvechikov.1.fopt, from=0, to=1)
+curve(Shvechikov.2.fopt, from=0, to=1)
+with(train, plot(covariates, optimal.treatment, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+with(train, plot(covariates, treatment - optimal.treatment, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, .03)))
+with(train, plot(covariates, abs(treatment - optimal.treatment)**2, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+with(train, plot(covariates, GetQFunctionValues(covariates, treatment, optimal.treatment), 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+
+
+train <- GetSimulationData(1000, scenario = "shvechikov.1", sd=0.0)
+granularity <- 4
+levels <- 1:granularity / granularity
+d <- with(train, data.frame(reward=reward, treatment=treatment, covariates=covariates, 
+                            treat.bins=cut(treatment, c(0, quantile(treatment, levels)), include.lowest = T), 
+                            rew.bins=cut(reward, c(0, quantile(reward, levels)), include.lowest = T), 
+                            cov.bins=cut(covariates, c(0, quantile(covariates, levels)), include.lowest = T)))
+
+ggplot(d, aes(covariates, treatment, col=reward)) +  geom_point() + geom_smooth() + facet_wrap(~rew.bins) +
+   scale_color_gradient(low="red",  high="green")
+
+ggplot(d, aes(treatment, reward, col=covariates)) + geom_point() + geom_smooth() + facet_wrap(~cov.bins)
+ggplot(d, aes(covariates, reward, col=reward)) + geom_point() + geom_smooth() + facet_wrap(~treat.bins)
+```
+
+
+
+
+
+
+
+Визуализация облака  точек  из обучающей выборки: 
+```{r}
+train <- GetSimulationData(200, scenario = "shvechikov.1", sd=0)
+d <- with(train, data.frame(reward=reward, treatment=treatment, covariates=covariates, 
+                            treat.bins=cut(treatment, c(0, quantile(treatment, levels)), include.lowest = T), 
+                            rew.bins=cut(reward, c(0, quantile(reward, levels)), include.lowest = T), 
+                            cov.bins=cut(covariates, c(0, quantile(covariates, levels)), include.lowest = T)))
+for (i in seq(-180, 180, 20)) {
+  # x - treatment;  y - covariates; z - reward
+  print(cloud(reward ~  treatment * covariates, data=d, screen = list(z = i, x = -60, y = 0)))
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# All possible models in tgp package
+
+Some helper functions:
+```{r functions definitions}
+GetBestPredictions <- function(gp_model, s = 2) {
+  means <- gp_model$ZZ.mean
+  stds <- sqrt(gp_model$ZZ.s2)
+  dt <- data.table(gp_model$XX)
+  dt[, LB:= means - s * stds]
+  return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), keyby=C])
+}
+
+GetValueOfPredictedA <- function(best.estim.dt, data.obj)  {
+  best.estim.dt[, mean(data.obj$GetQFunctionValues(C, A_pred))]
+}
+
+PlotDecisionSurface <- function(models, s=2) {
+  for(m_name in names(models)) {
+    m <-  models[[m_name]]
+    surf <- matrix(m$ZZ.mean - s * sqrt(m$ZZ.s2), nrow=length(unique(m$XX$A)))
+    plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  
+                      ylab="A", main=paste("Decision Surface, s = ", s))
+    plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main=m_name, 
+                      par.settings = list(axis.line = list(col = "transparent")))
+    grid.arrange(plt1, plt2, ncol=2)
+  }
+}
+
+FitAndPlotAllModels <- function(noise_sd=NULL, n_samples=100, scenario=NULL, s=2, 
+      model_names=c("bgp", "bgpllm", "btgp", "btgpllm"), train=NULL, test=NULL) {
+  # model_names=c("blm", "btlm", "bcart", "bgp", "bgpllm", "btgp", "btgpllm")) {
+  stopifnot(!is.null(scenario))
+  # stop if we do not know noise.sd and there are no explicit data for either train or test
+  stopifnot(xor(is.null(noise.sd), is.null(train) || is.null(test)))
+  if (is.null(train)) train <- GetSimulationData(n_samples, scenario = scenario, sd=noise_sd)
+  if (is.null(test))  test <- GetSimulationData(n_samples, scenario = scenario, sd=noise_sd)
+  
+  A_grid <- seq(0, 1, length.out = min(n_samples, 80)) 
+  X <- with(train, data.frame(C=covariates, A=treatment))
+  Y <- train$reward
+  ZZ <- expand.grid(seq(0,1,length.out = n_samples), A_grid)  
+  
+  # fit selected models - may take time
+  models <- lapply(model_names, function(f_name) do.call(f_name, list(X, Y, ZZ)))
+  names(models) <- model_names
+  
+  predictions <- list()
+  best_Q <- list()
+  for (m in models) {
+    res_dt <- GetBestPredictions(m, s=s)
+    predictions[[1]]  <- res_dt$C
+    predictions[[length(predictions) + 1]]  <- res_dt$A_pred
+    best_Q[[length(best_Q) + 1]] <- GetValueOfPredictedA(res_dt, train)
+  }
+  dt <- as.data.table(predictions)
+  formatted_names <- paste(model_names, paste(", Q =",  round(unlist(best_Q), 5)), sep="")
+  names(dt) <- c("C", formatted_names)
+  dt_melted <- melt(dt, id.vars = "C", variable.name = "Algo",  value.name = "est_A")
+  gg <- ggplot(dt_melted, aes(C, est_A)) + geom_point() + geom_smooth() + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  gg <- ggplot(dt_melted, aes(C, est_A, col=Algo)) + geom_smooth()
+  print(gg)
+  dt_melted[, A_optimal := test$GetOptimalTreatment(C)]
+  gg <- ggplot(dt_melted, aes(x=C, y=est_A)) + geom_point() + geom_smooth() + 
+    geom_line(aes(C, A_optimal, col="red")) + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  
+  for (m_name in names(models)){
+    plot(models[[m_name]], main=paste(m_name, ", s = ", s))
+  }
+  PlotDecisionSurface(models, s = s)
+}
+
+```
+
+
+# NO noise
+```{r}
+system.time({
+  FitAndPlotAllModels(noise_sd = 0, n_samples = 100, scenario = "shvechikov.1", s=0)
+})
+```
+
+```{r}
+FitAndPlotAllModels(noise_sd = 0, n_samples = 100, scenario = "shvechikov.1", s=2)
+```
+
+# MODERATE noise 
+```{r}
+FitAndPlotAllModels(noise_sd = 0.05, n_samples = 100, scenario = "shvechikov.1", s=0)
+```
+
+```{r}
+FitAndPlotAllModels(noise_sd = 0.05, n_samples = 100, scenario = "shvechikov.1", s=2)
+```
+
+# STRONG noise 
+```{r}
+FitAndPlotAllModels(noise_sd = 0.1, n_samples = 100, scenario = "shvechikov.1", s=0)
+```
+
+```{r}
+FitAndPlotAllModels(noise_sd = 0.1, n_samples = 100, scenario = "shvechikov.1", s=2)
+```
+

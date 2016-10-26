@@ -80,23 +80,6 @@ GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, sd=1,
 #                     V2 = seq(-1, 1, length.out = 100))
 
 
-Shvechikov.1.fopt <- function(x) {
-  step.start = 15
-  breakage.start = 40
-  first.part <- x**2  *  exp(- x**(.8)) +  (x - step.start) / 50 + .5
-  first.and.changed.part <- ( - x**1.9 / 900 + 6 *  sin(x/6) + 1.5 * (sin(x**1.01 ) + 1) * x**(1/7) )* 1/20 
-  second.part <-  (- first.part + first.and.changed.part) * (x > breakage.start)
-  whole <- first.part + second.part
-  f <- function(x) { # scaled Runge function
-    x <- x / 60   - 0.3
-    cos(3*pi*x)/(1+25*(x-0.25)^2) 
-  }
-  return ((whole + f(x)) / 2 + 0.35)
-} 
-
-Shvechikov.2.fopt <- function(x) {
-  return (((x - 50) / 50) ** 2)
-} 
 
 ReplaceExtremeWithUnif <- function(values, min.val, max.val){
   violatros.index <- values < min.val | values > max.val
@@ -104,40 +87,22 @@ ReplaceExtremeWithUnif <- function(values, min.val, max.val){
   return(values)
 }
 
+Shvechikov.2.fopt <- function(x) {
+  return (((x - .5) / .5) ** 2)
+} 
 
-GetDataForSchvechikov.1 <- function(sample.size,  min.A=0, max.A=1, min.X=0, max.X=100, sd=NULL, noise=T) {
-  GetQFunctionValues <- function(covars, given.A, optimal.A) {
+
+GetDataForSchvechikov.2 <- function(sample.size,  sd, min.A=0, max.A=1, min.X=0, max.X=1){
+  GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
+    if (is.null(optimal.A)) {
+      optimal.A <- Shvechikov.2.fopt(covars)
+    }
     return (-(given.A - optimal.A) ** 2)
   }
-  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X)
-  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
-  A.opt <-  Shvechikov.1.fopt(X)
-  Q.vals <-GetQFunctionValues(X, A, A.opt)
-  if (is.null(sd)) {
-    sd <- ifelse(noise, 1, 0)
-  }
-  R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
-  data <- list(covariates = X, treatment=A, optimal.treatment=A.opt, 
-               prop.scores = rep(1, sample.size))
-  data$GetQFunctionValues = GetQFunctionValues
-  data <- c(data, R.list)
-  data <- lapply(data, function(x)  {if (is.numeric(x)) as.matrix(x) else x} )
-  data$GetOptimalTreatment <- Shvechikov.1.fopt
-  return (data)
-}
-
-
-GetDataForSchvechikov.2 <- function(sample.size,  min.A=0, max.A=1, min.X=0, max.X=100, sd=NULL, noise=T) {
-  GetQFunctionValues <- function(covars, given.A, optimal.A) {
-    return (-(given.A - optimal.A) ** 2)
-  }
-  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X)
-  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
+  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=3, rate=7.3), min.X, max.X)
+  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=3, rate=7.3), min.A, max.A)
   A.opt <-  Shvechikov.2.fopt(X)
   Q.vals <-GetQFunctionValues(X, A, A.opt)
-  if (is.null(sd)) {
-    sd <- ifelse(noise, 1, 0)
-  }
   R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
   data <- list(covariates = X, treatment=A, optimal.treatment=A.opt, 
                prop.scores = rep(1, sample.size))
@@ -151,6 +116,51 @@ GetDataForSchvechikov.2 <- function(sample.size,  min.A=0, max.A=1, min.X=0, max
 
 
 
+
+Shvechikov.1.fopt <- function(x) {
+  x = x * 100  # initially function was written to support x from 0 to 100, not from 0 to 1
+  step.start = 15
+  breakage.start = 40
+  first.part <- x**2  *  exp(- x**(.8)) +  (x - step.start) / 50 + .5
+  first.and.changed.part <- ( - x**1.9 / 900 + 6 *  sin(x/6) + 1.5 * (sin(x**1.01 ) + 1) * x**(1/7) )* 1/20 
+  second.part <-  (- first.part + first.and.changed.part) * (x > breakage.start)
+  whole <- first.part + second.part
+  f <- function(x) { # scaled Runge function
+    x <- x / 60   - 0.3
+    cos(3*pi*x)/(1+25*(x-0.25)^2) 
+  }
+  return ((whole + f(x)) / 2 + 0.35)
+} 
+
+
+GetDataForSchvechikov.1 <- function(sample.size, sd, min.A=0, max.A=1, min.X=0, max.X=100) {
+  GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
+    if (is.null(optimal.A)) {
+      optimal.A <- Shvechikov.1.fopt(covars)
+    }
+    return (-(given.A - optimal.A) ** 2)
+  }
+  X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X) 
+  X <- X / 100 # hack to bring X in [0,1] range
+  A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
+  A.opt <-  Shvechikov.1.fopt(X)
+  Q.vals <-GetQFunctionValues(X, A, A.opt)
+  R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
+  data <- list(covariates = X, treatment=A, optimal.treatment=A.opt, 
+               prop.scores = rep(1, sample.size))
+  data$GetQFunctionValues = GetQFunctionValues
+  data <- c(data, R.list)
+  data <- lapply(data, function(x)  {if (is.numeric(x)) as.matrix(x) else x} )
+  data$GetOptimalTreatment <- Shvechikov.1.fopt
+  return (data)
+}
+
+
+
+
+
+
+## COMPATABLIITY WITH OLD CODE IS BROKEN BY INTRODUCING NEW GetQFunctionValue
 GetSimulationData <- function(sample.size,  scenario="chen.1", add.intercept=T, ...) {
   
   if (grepl("shvechikov", scenario, ignore.case = T)) { 

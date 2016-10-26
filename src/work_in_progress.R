@@ -537,7 +537,7 @@ with(train, plot(covariates, GetQFunctionValues(covariates, treatment, optimal.t
 library(ggplot2)
 
 train <- GetSimulationData(1000, scenario = "shvechikov.2", sd=0.0)
-granularity <- 16
+granularity <- 4
 levels <- 1:granularity / granularity
 d <- with(train, data.frame(reward=reward, treatment=treatment, covariates=covariates, 
                             treat.bins=cut(treatment, c(0, quantile(treatment, levels)), include.lowest = T), 
@@ -582,54 +582,144 @@ cl <- cloud(reward ~  treatment * covariates, data=d, screen = list(z = i, x = -
 
 # GP regression  ----------------------------------------------------------
 
-
-
-# TGP approach  -----------------------------------------------------------
 library(tgp)
+library(ggplot2)
 library(data.table)
+library(gridExtra)
+library(lattice)
 
 
 
-# No noise, 100 observations
-n_samples = 100
-train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=0.1)
-X <- with(train, data.frame(C=covariates/100, A=treatment))
-Y <- train$reward
-
-test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=0.1)
+test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=0.02)
 A.grid <- seq(0, 1, length.out = 100) 
-ZZ <- with(test, expand.grid(covariates / 100, A.grid))
+ZZ <- expand.grid(seq(0,1,length.out = 100), A.grid)
 
 gp_bgp <- bgp(X, Y)
 par(mfrow=c(1,1))
-plot(gp_bgp)
 
 
-####  MEAN WITH S*\SQRT(VAR)  APPROACH  #######
+m <- bgp(X, Y, XX=ZZ)
+m <- models[["bgp"]]
+plot(m)
+levelplot(matrix(m$ZZ.q, nrow=100),  xlab="C",   ylab="A") # q.95 - q.05
+levelplot(matrix(m$ZZ.s2, nrow=100), col.regions = gray(0:100/100), xlab="C",   ylab="A") # predictive variance
 
-# train_funcs <- c(blm, btlm, bcart, bgp, bgpllm, btgp, btgpllm)
-# models <- lapply(train_funcs, function(f) m(X, Y, ZZ))
+levelplot(matrix)
 
 
-
-gp_bgp_with_test <- bgp(X, Y, XX=ZZ)
 GetBestPredictions <- function(gp_model, s = 1) {
-  gp_model <- gp_bgp_with_test
   means <- gp_model$ZZ.mean
   stds <- sqrt(gp_model$ZZ.s2)
   dt <- data.table(gp_model$XX) 
   dt[, LB:= means - s * stds]
   return(dt[, .(est_A=A[which.max(LB)], est_LB=max(LB)), keyby=C])
 }
-preds <- GetBestPredictions(gp_bgp_with_test)
-with(test, preds[, optimal_A := GetOptimalTreatment(C*100)])
-# preds
-# melt(preds[, !"est_LB", with=F], id="C")
-ggplot(preds, aes(x=C, y=est_A)) + geom_point() + geom_smooth() + geom_line(aes(C, optimal_A, col="red"))
+list_of_figures <- list()
+for (s in 0:8) {
+  preds <- GetBestPredictions(m, s)
+  preds[, optimal_A := test$GetOptimalTreatment(C*100)]
+  gg <- ggplot(preds, aes(x=C, y=est_A)) + geom_point() + geom_smooth() +
+          geom_line(aes(C, optimal_A, col="red")) + ggtitle(paste("Substract ", s, "deviations"))
+  print(gg)
+  Sys.sleep(1)
+  list_of_figures[[length(list_of_figures) + 1]] <- gg 
+}
+s <- arrangeGrob(grobs=list_of_figures)
+grid.arrange(s)
 
 
 
 
+# TGP approach  -----------------------------------------------------------
+
+
+# No noise, 100 observations
+n_samples = 10
+train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=0)
+X <- with(train, data.frame(C=covariates/100, A=treatment))
+Y <- train$reward
+
+test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=0)
+A.grid <- seq(0, 1, length.out = 100) 
+ZZ <- with(train, expand.grid(covariates / 100, A.grid))
+# ZZ <- expand.grid(seq(0,1,length.out = 100), A.grid)
+
+
+
+####  MEAN WITH S*\SQRT(VAR)  APPROACH  #######
+
+func_names <- c("blm", "btlm", "bcart", "bgp", "bgpllm", "btgp", "btgpllm")
+models <- lapply(func_names, function(f_name) do.call(f_name, list(X, Y, ZZ)))
+names(models) <- func_names
+
+GetBestPredictions <- function(gp_model, s = 1) {
+  means <- gp_model$ZZ.mean
+  stds <- sqrt(gp_model$ZZ.s2)
+  dt <- data.table(gp_model$XX) 
+  dt[, LB:= means - s * stds]
+  return(dt[, .(est_A=A[which.max(LB)], est_LB=max(LB)), keyby=C])
+}
+
+GetValueOfPredictedA <- function(best.estim.dt, test.obj)  
+  best.estim.dt[, mean(test.obj$GetQFunctionValues(C, est_A))]
+
+GetTunedBestPredictions <- function(model, test.obj=test) {
+  seq.of.s <- seq(0, 1000, length.out = 100)
+  seq.of.Q.vals <- sapply(seq.of.s, function(s) {
+    result.dt <- GetBestPredictions(model, s)
+    GetValueOfPredictedA(result.dt, test.obj)
+  }) 
+  plot(seq.of.Q.vals)
+  best.s <- seq.of.s[which.max(seq.of.Q.vals)]
+  best.result.dt <-  GetBestPredictions(model, s=best.s)
+  return (list(m_pred=best.result.dt, best.s=best.s))
+}
+
+m <- bgp(X, Y, XX=X)
+m$ZZ.s2
+m$ZZ.ks2
+
+p <- GetTunedBestPredictions(m, test)
+p$best.s
+ggplot(p$m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + geom_line(aes(C, test$GetOptimalTreatment(C*100)), col="red")
+
+
+m_pred <- GetBestPredictions(m, s=10)
+m_pred <- GetBestPredictions(m, s=3)
+ggplot(m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + geom_line(aes(C, test$GetOptimalTreatment(C*100)))
+
+plot(m)
+
+
+predictions <- list()
+best.s <- list()
+for (m_name in names(models)) {
+  tuned.res.dt <- GetTunedBestPredictions(models[[m_name]])
+  predictions[[1]]  <- tuned.res.dt$m_pred$C
+  predictions[[length(predictions) + 1]]  <- m_pred$est_A
+  best.s[[length(best.s) + 1]]  <- tuned.res.dt$best.s
+}
+dt <- as.data.table(predictions)
+names(dt) <- c("C", func_names)
+dt.melted <- melt(dt, id.vars = "C", variable.name = "Algo",  value.name = "est_A")
+ggplot(dt.melted, aes(C, est_A)) + geom_point() + geom_smooth() + facet_wrap(~ Algo, nrow = 2)
+ggplot(dt.melted, aes(C, est_A, col=Algo)) + geom_smooth()
+dt.melted[, optimal_A := test$GetOptimalTreatment(C*100)]
+ggplot(dt.melted, aes(x=C, y=est_A)) + geom_point() + geom_smooth() + 
+  geom_line(aes(C, optimal_A, col="red")) + facet_wrap(~ Algo, nrow = 2)
+dt[, c("C", "est_A") := .(C, bgp)]
+
+Q.vals  <- sapply(dt[, !"C", with=F],  f)
+barplot(Q.vals)
+
+
+plot(models$blm)
+plot(models$btlm)
+plot(models$bcart)
+plot(models$bgp)
+plot(models$bgpllm)
+plot(models$btgp)
+plot(models$btgpllm)
 
 
 
@@ -647,6 +737,69 @@ hist(gp_bgp_with_test$ZZ.mean  - gp_bgp_with_test$ZZ.km, breaks = 100)
 
 
 gp_r_xa <- GP_fit(X, Y, corr=list(type="exponential",power=2))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -858,6 +1011,215 @@ fit <- fitdistr(, "gamma")
 a <- c(1, 1, 2, 4)
 outer(a,a)
 sum(outer(a,a))
+
+
+
+
+
+
+
+
+install.packages("plotly")
+library(plotly)
+
+plot_ly(df, x = ~x, y = ~y, z = ~z) %>% add_markers()
+
+
+
+
+
+
+
+
+#  KO-Learning on OUR data ------------------------------------------------
+
+ChangeFormatFromOurToChenEnriched <- function(our.data) {
+  with(our.data, list(X=covariates, A=treatment, R=raw.reward, D_opt=optimal.treatment, 
+                      mu=GetQFunctionValues(covariates, treatment, optimal.treatment),
+                      GetQFunctionValues=GetQFunctionValues))
+}
+
+# slightly rewritten function from KO-learning pred_s2 to achieve flexibility
+pred_s4 <- function(model,test) {
+  A_pred <- pmin(pmax(predict(model,test$X), 0), 1)
+  pred_value <- with(test, mean(GetQFunctionValues(X, A_pred, D_opt)))
+  return(list(A_pred=A_pred, Q=pred_value))
+}
+      
+
+
+
+#############         Without Noise        ###############
+
+n_samples <- 100
+n_test_samples <- 200
+# n_covariates <- 10
+noise.sd <- 0
+
+train <- GetSimulationData(sd=noise.sd, sample.size = n_samples, scenario = "shvechikov.1")
+test <- GetSimulationData(sd=noise.sd, sample.size = n_test_samples, scenario = "shvechikov.1")
+ko_train <- ChangeFormatFromOurToChenEnriched(train)
+ko_test <- ChangeFormatFromOurToChenEnriched(test)
+
+
+
+GetKOLearningValueAndPredictedDose <- function(train, test) {
+  ### add a constant such that the weight will not be negative
+  constant = min(quantile(train$R,0.6),0)
+  train$weight = train$R - constant
+  
+  index = which(train$R > quantile(train$R,0.6))
+  ########################
+  ### Such steps can be regared as one-step DC algorithm, the initial vaule/the initial 
+  ### index is from the quantile, then the next step model fitting update this initial solution
+  ### model with reward/outcome as weights
+  model_nopen  = svm(x = train$X[index,], y = train$A[index], w= train$weight[index], 
+               type="eps-regression", epsilon = 0.15, scale=FALSE)
+  return(pred_s4(model_nopen,test))
+}
+
+
+
+
+
+FitAndPlotAllModels(noise_sd = 0, n_samples = 10, scenario = "shvechikov.1", s=0)
+
+
+
+test$covariates
+
+
+
+model_name = "blm"
+
+GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, s=2) {
+  stopifnot(is.character(model_name))
+  n_samples <- length(train$reward)
+  A_grid <- seq(0, 1, length.out = min(n_samples, 80)) 
+  X <- with(train, data.frame(C=covariates, A=treatment))
+  Y <- train$reward
+  ZZ <- expand.grid(C=test$covariates, A=A_grid)
+  model <- do.call(model_name, list(X,Y,ZZ)) 
+  res_dt <- GetBestPredictions(model, s=s)
+  
+  predictions <- list()
+  best.Q <- list()
+  for (m in models) {
+    res.dt <- GetBestPredictions(m, s=s)
+    predictions[[1]]  <- res.dt$C
+    predictions[[length(predictions) + 1]]  <- res.dt$est_A
+    best.Q[[length(best.Q) + 1]] <- GetValueOfPredictedA(res.dt, train)
+  }
+  dt <- as.data.table(predictions)
+  formatted.names <- paste(model_names, paste(", Q =",  round(unlist(best.Q), 5)), sep="")
+  names(dt) <- c("C", formatted.names)
+  
+}
+
+
+GetKOLearningValueAndPredictedDose(ko_train, ko_test)$pred_value
+GetGPValueAndPredictedDose(ko_train, ko_test)$pred_value
+
+
+
+
+
+
+
+
+
+
+
+
+ind=2
+covsize=10
+
+datagen <- Scenario4
+results_kol_s4 <- list()
+
+for(samplesize in c(300)){
+  allloop =allloop + 1
+  simsize = 200
+  ### we record both the value function and dose (for the testing set).
+  value_nopen = value_pen = rep(0,simsize)
+  pred_dose <- list()
+  test = datagen(5000,covsize,seed=ind+30000)
+  for (loop in 1:simsize) {
+    print(loop)
+    train = datagen(samplesize,covsize,seed=loop+20002+samplesize)
+    ### add a constant such that the weight will not be negative
+    constant = min(quantile(train$R,0.6),0)
+    train$weight = train$R - constant
+    
+    index = which(train$R > quantile(train$R,0.6))
+    ########################
+    ### Such steps can be regared as one-step DC algorithm, the initial vaule/the initial 
+    ### index is from the quantile, then the next step model fitting update this initial solution
+    ### model with reward/outcome as weights
+    model_nopen  = svm(x = train$X[index,], y = train$A[index], w= train$weight[index], 
+                       type="eps-regression", epsilon = 0.15, scale=FALSE)
+    tmpresults = pred_s2(model_nopen,test)
+    value_nopen[loop] = tmpresults$pred_value
+    pred_dose[[loop]] = tmpresults$pred_dose
+    
+    ############### propensity score part
+    mydata = data.frame(T = train$A,X = train$X)
+    model.num = lm(T~1,data = mydata)
+    ps.num = dnorm((mydata$T - model.num$fitted) / (summary(model.num))$sigma, 0, 1)
+    model.den = gbm(T~., data = mydata, shrinkage = 0.0005,
+                    interaction.depth = 4, distribution = "gaussian", n.trees = 20000)
+    opt = optimize(F.aac.iter, interval = c(1,20000), data = mydata, 
+                   ps.model = model.den, ps.num = ps.num,rep = 50,criterion = "pearson")
+    best.aac.iter = opt$minimum
+    best.aac = opt$objective
+    # Calculate the inverse probability weights
+    model.den$fitted = predict(model.den, newdata = mydata,
+                               n.trees = floor(best.aac.iter), type = "response")
+    ps.den = dnorm((mydata$T - model.den$fitted) / sd(mydata$T - model.den$fitted), 0, 1)
+    weight.gbm = ps.num/ps.den
+
+    ### model with estimated propensity score times reward/outcome as weigths
+    
+    model_pen = svm(x = train$X[index,], y = train$A[index], w= (train$weight*weight.gbm)[index], 
+                    type="eps-regression", epsilon = 0.15, scale=FALSE)
+    tmpresults = pred_s2(model_pen,test)
+    value_pen[loop] = tmpresults$pred_value
+    
+    results=list(value_nopen=value_nopen,value_pen=value_pen, dose=pred_dose,size=samplesize)
+    results_kol_s4[[allloop]] <- results
+  }
+}
+
+# results_kol_s4:
+with(results_kol_s4, {
+  c(mean(value_nopen), mean(value_pen))
+})
+
+
+
+
+
+
+
+FitAndPlotAllModels(noise.sd = 0, n_samples = 100, scenario = "shvechikov.1", s=2)
+
+
+
+
+
+
+
+
+# OUR model on Kosorok data -----------------------------------------------
+
+
+
+
+ko.train <- Scenario4(size = n_samples, ncov = n_covariates, seed = 0)
+
+
+
+
 
 
 

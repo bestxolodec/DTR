@@ -1,0 +1,312 @@
+---
+title: "Different GP models"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(cache=F, fig.path='/tmp/RmdFigs/', fig.width=10, fig.height=6)
+
+
+
+# Deisgn X  and data generation
+
+```{r,  echo=FALSE, warning=FALSE, message=FALSE}
+library(tgp)
+library(ggplot2)
+library(data.table)
+library(gridExtra)
+library(lattice)
+source("./simulations.functions.R")
+```
+
+
+
+Отладочные графики генерации данных для шума
+```{r}
+train <- GetSimulationData(10000, scenario = "shvechikov.2", sd=0.0)
+curve(Shvechikov.1.fopt, from=0, to=100)
+curve(Shvechikov.2.fopt, from=0, to=1)
+with(train, plot(covariates, optimal.treatment, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+with(train, plot(covariates, treatment - optimal.treatment, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, .03)))
+with(train, plot(covariates, abs(treatment - optimal.treatment)**2, 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+with(train, plot(covariates, GetQFunctionValues(covariates, treatment, optimal.treatment), 
+                 pch=19, cex=1.2, col=rgb(0,0.5,0.5, 0.03)))
+
+
+train <- GetSimulationData(1000, scenario = "shvechikov.2", sd=0.0)
+granularity <- 4
+levels <- 1:granularity / granularity
+d <- with(train, data.frame(reward=reward, treatment=treatment, covariates=covariates, 
+                            treat.bins=cut(treatment, c(0, quantile(treatment, levels)), include.lowest = T), 
+                            rew.bins=cut(reward, c(0, quantile(reward, levels)), include.lowest = T), 
+                            cov.bins=cut(covariates, c(0, quantile(covariates, levels)), include.lowest = T)))
+
+ggplot(d, aes(covariates, treatment, col=reward)) +  geom_point() + geom_smooth() + facet_wrap(~rew.bins) +
+   scale_color_gradient(low="red",  high="green")
+
+
+ggplot(d, aes(treatment, reward, col=covariates)) + geom_point() + geom_smooth() + facet_wrap(~cov.bins)
+ggplot(d, aes(covariates, reward, col=reward)) + geom_point() + geom_smooth() + facet_wrap(~treat.bins)
+ggplot(d, aes(covariates, treatment, col=reward)) +  geom_point() + geom_smooth() + facet_wrap(~rew.bins) + geom_density2d(col="black")
+```
+
+
+
+
+
+
+
+Визуализация облака  точек  из обучающей выборки: 
+```{r}
+train <- GetSimulationData(200, scenario = "shvechikov.1", sd=0)
+d <- with(train, data.frame(reward=reward, treatment=treatment, covariates=covariates, 
+                            treat.bins=cut(treatment, c(0, quantile(treatment, levels)), include.lowest = T), 
+                            rew.bins=cut(reward, c(0, quantile(reward, levels)), include.lowest = T), 
+                            cov.bins=cut(covariates, c(0, quantile(covariates, levels)), include.lowest = T)))
+for (i in seq(-180, 180, 5)) {
+  # x - treatment;  y - covariates; z - reward
+  print(cloud(reward ~  treatment * covariates, data=d, screen = list(z = i, x = -60, y = 0)))
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# All possible models in tgp package
+
+
+
+Some helper functions:
+```{r}
+GetBestPredictions <- function(gp_model, s = 1) {
+  means <- gp_model$ZZ.mean
+  stds <- sqrt(gp_model$ZZ.s2)
+  dt <- data.table(gp_model$XX) 
+  dt[, LB:= means - s * stds]
+  return(dt[, .(est_A=A[which.max(LB)], est_LB=max(LB)), keyby=C])
+}
+
+GetValueOfPredictedA <- function(best.estim.dt, test.obj)  
+  best.estim.dt[, mean(test.obj$GetQFunctionValues(C, est_A))]
+
+GetTunedBestPredictions <- function(model, test.obj=test, seq.of.s=NULL) {
+  if (is.null(seq.of.s)) {
+    seq.of.s <- seq(0, 20, length.out = 100)
+  }
+  seq.of.Q.vals <- sapply(seq.of.s, function(s) {
+    result.dt <- GetBestPredictions(model, s)
+    GetValueOfPredictedA(result.dt, test.obj)
+  }) 
+  plot(seq.of.s, seq.of.Q.vals, type="l")
+  best.s <- seq.of.s[which.max(seq.of.Q.vals)]
+  best.result.dt <-  GetBestPredictions(model, s=best.s)
+  return (list(m_pred=best.result.dt, best.s=best.s, best.Q=max(seq.of.Q.vals)))
+}
+
+PlotDecisionSurface <- function(models) {
+  for(m_name in names(models)) {
+    m <-  models[[m_name]]
+    surf <- matrix(m$ZZ.mean - s * sqrt(m$ZZ.s2), nrow=length(unique(m$XX$A)))
+    plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  ylab="A")
+    plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main=m_name, 
+                      par.settings = list(axis.line = list(col = "transparent")))
+    grid.arrange(plt1, plt2, ncol=2)
+  }
+}
+
+FitAndPlotAllModels <- function(noise.sd=0.1, n_samples=100)  {
+  train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=noise.sd)
+  test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=noise.sd)
+  A.grid <- seq(0, 1, length.out = min(n_samples, 100)) 
+  X <- with(train, data.frame(C=covariates, A=treatment))
+  Y <- train$reward
+  ZZ <- expand.grid(seq(0,1,length.out = n_samples), A.grid)  
+  
+  # fit all models
+  func_names <- c("blm", "btlm", "bcart", "bgp", "bgpllm", "btgp", "btgpllm")
+  models <- lapply(func_names, function(f_name) do.call(f_name, list(X, Y, ZZ)))
+  names(models) <- func_names
+  
+  predictions <- list()
+  best.s <- list()
+  best.Q <- list()
+  for (m in models) {
+    tuned.res <- GetTunedBestPredictions(m, test=test)
+    predictions[[1]]  <- tuned.res$m_pred$C
+    predictions[[length(predictions) + 1]]  <- tuned.res$m_pred$est_A
+    best.s[[length(best.s) + 1]]  <- tuned.res$best.s
+    best.Q[[length(best.Q) + 1]] <- tuned.res$best.Q
+  }
+  dt <- as.data.table(predictions)
+  formatted.names <- paste(func_names, paste(", s =", round(unlist(best.s),2)), sep="")
+  formatted.names <- paste(formatted.names, paste(", Q =",  round(unlist(best.Q), 2)), sep="")
+  names(dt) <- c("C", formatted.names)
+  dt.melted <- melt(dt, id.vars = "C", variable.name = "Algo",  value.name = "est_A")
+  gg <- ggplot(dt.melted, aes(C, est_A)) + geom_point() + geom_smooth() + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  gg <- ggplot(dt.melted, aes(C, est_A, col=Algo)) + geom_smooth()
+  print(gg)
+  dt.melted[, optimal_A := test$GetOptimalTreatment(C)]
+  gg <- ggplot(dt.melted, aes(x=C, y=est_A)) + geom_point() + geom_smooth() + 
+    geom_line(aes(C, optimal_A, col="red")) + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  
+  
+  plot(models$blm)
+  plot(models$btlm)
+  plot(models$bcart)
+  plot(models$bgp)
+  plot(models$bgpllm)
+  plot(models$btgp)
+  plot(models$btgpllm)
+  
+  PlotDecisionSurface(models)
+}
+
+```
+
+
+
+### No noise, 100 observations, testing on uniform grid
+If there are no noise in data -- it is best to predict using $\mathbb{E}(f_*) - 0 \cdot \sqrt{\mathbb{V}(f_*)}  $. And it is very cool, that model learns almost perfect solution in regeions where there are no trainning points.
+```{r}
+
+n_samples = 100
+sd = 0
+train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+A.grid <- seq(0, 1, length.out = n_samples) 
+X <- with(train, data.frame(C=covariates, A=treatment))
+Y <- train$reward
+ZZ <- expand.grid(seq(0,1,length.out = n_samples), A.grid)
+
+m <- bgp(X, Y, XX=ZZ)
+plot(m)
+pred <- GetBestPredictions(m)
+
+ggplot(pred, aes(C, est_A)) + geom_smooth() + geom_point() + 
+  geom_line(aes(C, test$GetOptimalTreatment(C)), col="red") + 
+  geom_vline(xintercept = max(train$covariates), col="green") + 
+  geom_vline(xintercept = min(train$covariates), col="green") 
+  # ggtitle(paste("best s = ", p$best.s))
+
+seq.of.s <- exp(seq(-3,3, length.out=100))
+p <- GetTunedBestPredictions(m, test, seq.of.s = seq.of.s)
+ggplot(p$m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + 
+  geom_line(aes(C, test$GetOptimalTreatment(C)), col="red") + 
+  geom_vline(xintercept = max(train$covariates), col="green") + 
+  geom_vline(xintercept = min(train$covariates), col="green") +
+  ggtitle(paste("best s = ", p$best.s))
+
+```
+
+
+
+
+So let try to plot our decisions with different S. And see that
+
+* we could increase s as much as we want and obtain degenerate solution. 
+```{r}
+seq.of.s <- exp(seq(-1,3, length.out=40))
+for (s in seq.of.s) {
+  m_pred <- GetBestPredictions(m, s)
+  gg <- ggplot(m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + 
+    geom_line(aes(C, test$GetOptimalTreatment(C))) +
+    geom_vline(xintercept = max(train$covariates), col="green") + 
+    geom_vline(xintercept = min(train$covariates), col="green") +
+    ggtitle(paste("s = ", s))
+  print(gg)
+}
+```
+
+  
+
+TODO: 
+
+* why the minimum of fitted best treatment policy does not match the minimum of our best treatment?  
+
+In case we add *very strong* noise we get perfectly bad fitted surface:
+```{r}
+n_samples = 100
+sd = 0.15
+train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+A.grid <- seq(0, 1, length.out = n_samples) 
+X <- with(train, data.frame(C=covariates, A=treatment))
+Y <- train$reward
+ZZ <- expand.grid(seq(0,1,length.out = n_samples), A.grid)
+
+m <- bgp(X, Y, XX=ZZ)
+plot(m)
+p <- GetTunedBestPredictions(m, test)
+p$best.s
+ggplot(p$m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + 
+  geom_line(aes(C, test$GetOptimalTreatment(C)), col="red") + 
+  geom_vline(xintercept = max(train$covariates), col="green") + 
+  geom_vline(xintercept = min(train$covariates), col="green") + 
+  ggtitle(paste("Best s= ", p$best.s))
+
+```
+
+
+But even with this strong noise we could get more samples:
+```{r}
+n_samples = 300
+sd = 0.15
+train <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+test <- GetSimulationData(n_samples, scenario = "shvechikov.2", sd=sd)
+A.grid <- seq(0, 1, length.out = min(n_samples, 100))
+X <- with(train, data.frame(C=covariates, A=treatment))
+Y <- train$reward
+ZZ <- expand.grid(seq(0,1,length.out = n_samples), A.grid)
+
+m <- bgp(X, Y, XX=ZZ)
+plot(m)
+p <- GetTunedBestPredictions(m, test)
+p$best.s
+ggplot(p$m_pred, aes(C, est_A)) + geom_smooth() + geom_point() + 
+  geom_line(aes(C, test$GetOptimalTreatment(C)), col="red") + 
+  geom_vline(xintercept = max(train$covariates), col="green") + 
+  geom_vline(xintercept = min(train$covariates), col="green") + 
+  ggtitle(paste("Best s= ", p$best.s))
+
+```
+
+
+
+
+# Experiment with all of the models - no noise
+```{r}
+FitAndPlotAllModels(noise.sd = 0)
+```
+
+
+# Experiment with all of the models - MODERATE noise
+```{r}
+FitAndPlotAllModels(noise.sd = 0.04)
+```
+
+
+# Experiment with all of the models - STRONG noise
+```{r}
+FitAndPlotAllModels(noise.sd = 0.1)
+```
+
+
+
+
