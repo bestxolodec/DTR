@@ -1,7 +1,24 @@
+setwd("~/yandexDisk/DIPLOMA/CODE/src")
 source("./functions.R")
 library(doParallel)
 library(caret)
 library(reshape2)
+library(data.table)
+library(tgp)
+library(gridExtra)
+library(ggplot2)
+# install.packages("truncnorm")
+source("../../OWL/O_learning_functions.r")
+# hack to overcome   "do_rtruncnorm" not resolved from current namespace (truncnorm)  bug 
+rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
+  if (length(n) > 1) 
+    n <- length(n)
+  if (length(n) > 1) 
+    n <- length(n)
+  else if (!is.numeric(n)) 
+    stop("non-numeric argument n.")
+  .Call("do_rtruncnorm", as.integer(n), a, b, mean, sd, PACKAGE="truncnorm")
+}
 
 
 # Optimal policy functions ------------------------------------------------
@@ -478,7 +495,188 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
 
 
 
-# Score function ----------------------------------------------------------
+# GP ERA  ------------------------------------------------------------
+
+
+
+GetBestPredictions <- function(gp_model, s = 2) {
+  means <- gp_model$ZZ.mean
+  stds <- sqrt(gp_model$ZZ.s2)
+  dt <- data.table(gp_model$XX)
+  dt[, LB:= means - s * stds]
+  col_names <- c(grep('^C', names(dt), value = T))
+  return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
+}
+
+GetValueOfPredictedA <- function(best.estim.dt, data.obj)  {
+  best.estim.dt[, mean(data.obj$GetQFunctionValues(C, A_pred))]
+}
+
+PlotDecisionSurface <- function(models, s=2) {
+  for(m_name in names(models)) {
+    m <-  models[[m_name]]
+    surf <- matrix(m$ZZ.mean - s * sqrt(m$ZZ.s2), nrow=length(unique(m$XX$A)))
+    plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  
+                      ylab="A", main=paste("Decision Surface, s = ", s))
+    plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main=m_name, 
+                      par.settings = list(axis.line = list(col = "transparent")))
+    grid.arrange(plt1, plt2, ncol=2)
+  }
+}
+
+FitAndPlotAllModels <- function(noise_sd=NULL, n_samples=100, scenario=NULL, s=2, 
+                                model_names=c("bgp", "bgpllm", "btgp", "btgpllm"), train=NULL, test=NULL) {
+  # model_names=c("blm", "btlm", "bcart", "bgp", "bgpllm", "btgp", "btgpllm")) {
+  stopifnot(!is.null(scenario))
+  # stop if we do not know noise.sd and there are no explicit data for either train or test
+  stopifnot(xor(is.null(noise.sd), is.null(train) || is.null(test)))
+  if (is.null(train)) train <- GetSimulationData(n_samples, scenario = scenario, sd=noise_sd)
+  if (is.null(test))  test <- GetSimulationData(n_samples, scenario = scenario, sd=noise_sd)
+  
+  A_grid <- seq(0, 1, length.out = min(n_samples, 80)) 
+  X <- with(train, data.frame(C=covariates, A=treatment))
+  Y <- train$reward
+  ZZ <- expand.grid(seq(0,1,length.out = n_samples), A_grid)  
+  
+  # fit selected models - may take time
+  models <- lapply(model_names, function(f_name) do.call(f_name, list(X, Y, ZZ)))
+  names(models) <- model_names
+  
+  predictions <- list()
+  best_Q <- list()
+  for (m in models) {
+    res_dt <- GetBestPredictions(m, s=s)
+    predictions[[1]]  <- res_dt$C
+    predictions[[length(predictions) + 1]]  <- res_dt$A_pred
+    best_Q[[length(best_Q) + 1]] <- GetValueOfPredictedA(res_dt, train)
+  }
+  dt <- as.data.table(predictions)
+  formatted_names <- paste(model_names, paste(", Q =",  round(unlist(best_Q), 5)), sep="")
+  names(dt) <- c("C", formatted_names)
+  dt_melted <- melt(dt, id.vars = "C", variable.name = "Algo",  value.name = "est_A")
+  gg <- ggplot(dt_melted, aes(C, est_A)) + geom_point() + geom_smooth() + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  gg <- ggplot(dt_melted, aes(C, est_A, col=Algo)) + geom_smooth()
+  print(gg)
+  dt_melted[, A_opt := test$GetOptimalTreatment(C)]
+  gg <- ggplot(dt_melted, aes(x=C, y=est_A)) + geom_point() + geom_smooth() + 
+    geom_line(aes(C, A_opt, col="red")) + facet_wrap(~ Algo, nrow = 2)
+  print(gg)
+  
+  for (m_name in names(models)){
+    plot(models[[m_name]], main=paste(m_name, ", s = ", s))
+  }
+  PlotDecisionSurface(models, s = s)
+}
+
+
+ChangeFormatFromOurToChenEnriched <- function(our_data) {
+  with(our_data, list(X=covariates, A=treatment, R=raw.reward, D_opt=optimal.treatment, 
+                      mu=GetQFunctionValues(covariates, treatment, optimal.treatment),
+                      GetQFunctionValues=GetQFunctionValues, 
+                      GetOptimalTreatment=GetOptimalTreatment))
+}
+
+
+
+# EnrhichChenDataWithQfunction <- function(chen_data) {
+#   stopifnot(!is.null(chen_data$GetQFunctionValues))
+#   stopifnot(!is.null(chen_data$GetOptimalTreatment))
+#   
+#   if (!is.null(chen_data$GetQFunctionValues)) {
+#     chen_data$GetQFunctionValues <- chen_data$GetQFunctionValues
+#   } else {
+#     warning("This function works only for scenario.4! Don't use it for anything else!!!")
+#     chen_data$GetQFunctionValues <- function(X, A, A_opt=chen_data$D_opt){
+#       stopifnot(is.matrix(X))
+#       8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(A_opt-A)
+#     }
+#   }
+#   if (!is.null(chen_data$GetOptimalTreatment)) {
+#     chen_data$GetOptimalTreatment <- chen_data$GetOptimalTreatment
+#   } else {
+#     warning("This function works only for scenario.4! Don't use it for anything else!!!")
+#     chen_data$GetOptimalTreatment <- function(X) {
+#       stopifnot(is.matrix(X))
+#       I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) + 
+#         X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
+#     }
+#   }
+#   return (chen_data)
+# }
+
+
+ChangeFormatFromChenEnrichedToOur <- function(chen_data, eps=0.01) {
+  with(chen_data, list(covariates=X, treatment=A, raw.reward=R, 
+                       optimal.treatment=D_opt, reward=R - min(R) + eps, 
+                       GetQFunctionValues=GetQFunctionValues,
+                       GetOptimalTreatment=GetOptimalTreatment))
+}
+
+
+# slightly rewritten function from KO-learning pred_s2 to achieve flexibility
+pred_s4 <- function(model,test) {
+  A_pred <- pmin(pmax(predict(model,test$X), 0), 2)
+  pred_value <- with(test, mean(GetQFunctionValues(X, A_pred, D_opt)))
+  return(list(A_pred=A_pred, Q=pred_value))
+}
+
+
+GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
+  train$weight = with(train, R - min(quantile(R, q),0))
+  index = with(train, which(R > quantile(R,q)))
+  model = with(train, svm(x = X[index,], y = A[index], w=weight[index],   
+                          type="eps-regression", epsilon = 0.15, scale=FALSE))
+  return(pred_s4(model,test))
+}
+
+
+GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, s=2, eps=0.1) {
+  stopifnot(is.character(model_name))
+  n_samples <- length(train$reward)
+  X <- with(train, data.frame(C=covariates, A=treatment))
+  Y <- train$reward
+  granularity <- min(n_samples, 80)
+  A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
+  ZZ <-  data.table(C = test$covariates)
+  A_grid  <- data.table(rep(A_grid, nrow(ZZ)))
+  ZZ <- ZZ[rep(seq.int(1, nrow(ZZ)), each=granularity), ]
+  ZZ[, A:=A_grid]
+  model <- do.call(model_name, list(X,Y,ZZ)) 
+  res_dt <- GetBestPredictions(model, s=s)
+  col_names <- c(grep('^C', names(res_dt), value = T))
+  stopifnot(length(col_names) > 0)
+  C_matrix <-  as.matrix(res_dt[, col_names, with=F]) 
+  pred_value <- mean(test$GetQFunctionValues(C_matrix, res_dt$A_pred))
+  # why doesn't this work?
+  # pred_value <- with(test, res_dt[, mean(GetQFunctionValues(as.matrix(.SD), A_pred)), .SDcols=col_names])
+  return(list(A_pred=res_dt$A_pred, Q=pred_value))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Why this is not working ? 
+# res_dt[, .(.SD, A_pred),  .SDcols=col_names ]
+# res_dt[, f(.SD, A_pred),  .SDcols=col_names ]
+# Why this doesn't return a matrix ? 
+# res_dt[, as.matrix(col_names), with=F]
+
+
+
+
+
+
+
 
 
 
