@@ -7,6 +7,7 @@ library(data.table)
 library(tgp)
 library(gridExtra)
 library(ggplot2)
+library(stringr)  # could be thrown away
 # install.packages("truncnorm")
 source("../../OWL/O_learning_functions.r")
 # hack to overcome   "do_rtruncnorm" not resolved from current namespace (truncnorm)  bug 
@@ -499,9 +500,13 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
 
 
 
-GetBestPredictions <- function(gp_model, s = 2) {
+GetBestPredictions <- function(gp_model, s = 2, krige=F) {
+  if (krige) {
+    
+  }
   means <- gp_model$ZZ.mean
   stds <- sqrt(gp_model$ZZ.s2)
+  
   dt <- data.table(gp_model$XX)
   dt[, LB:= means - s * stds]
   col_names <- c(grep('^C', names(dt), value = T))
@@ -631,7 +636,7 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 }
 
 
-GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, s=2, eps=0.1) {
+GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, MAP=F, s=2, eps=0.1) {
   stopifnot(is.character(model_name))
   n_samples <- length(train$reward)
   X <- with(train, data.frame(C=covariates, A=treatment))
@@ -648,9 +653,19 @@ GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, s=2, eps=0.
   stopifnot(length(col_names) > 0)
   C_matrix <-  as.matrix(res_dt[, col_names, with=F]) 
   pred_value <- mean(test$GetQFunctionValues(C_matrix, res_dt$A_pred))
-  # why doesn't this work?
-  # pred_value <- with(test, res_dt[, mean(GetQFunctionValues(as.matrix(.SD), A_pred)), .SDcols=col_names])
   return(list(A_pred=res_dt$A_pred, Q=pred_value))
+}
+
+
+
+
+function(gp_model, s = 2) {
+  means <- gp_model$ZZ.mean
+  stds <- sqrt(gp_model$ZZ.s2)
+  dt <- data.table(gp_model$XX)
+  dt[, LB:= means - s * stds]
+  col_names <- c(grep('^C', names(dt), value = T))
+  return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
 }
 
 
@@ -658,11 +673,8 @@ GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, s=2, eps=0.
 
 
 
-
-
-
-
-
+# why doesn't this work?
+# pred_value <- with(test, res_dt[, mean(GetQFunctionValues(as.matrix(.SD), A_pred)), .SDcols=col_names])
 
 
 # Why this is not working ? 

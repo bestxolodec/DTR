@@ -1062,7 +1062,7 @@ plot_ly(df, x = ~x, y = ~y, z = ~z) %>% add_markers()
 
 #############         Without Noise        ###############
 
-n_samples <- 100
+n_samples <- 50
 n_test_samples <- 100
 noise.sd <- 0
 
@@ -1076,19 +1076,60 @@ res <- list()
 res$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
 res$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
 
-system.time( model <- do.call(model_name, list(X,Y,ZZ))  )
-# user    system  elapsed -- with pred.n=T
-# 156.730   4.104 165.087 
 
-system.time({
-  model_fitted <- do.call(model_name, list(X,Y))  
-  model_fitted_prediction <- predict(model_fitted, ZZ)
+model_name <- "bgp"
+eps <- 0.1
+n_samples <- length(train$reward)
+X <- with(train, data.frame(C=covariates, A=treatment))
+Y <- train$reward
+granularity <- min(n_samples, 80)
+A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
+ZZ <-  data.table(C = test$covariates)
+A_grid  <- data.table(rep(A_grid, nrow(ZZ)))
+ZZ <- ZZ[rep(seq.int(1, nrow(ZZ)), each=granularity), ]
+ZZ[, A:=A_grid]
+
+
+system.time ({
+  model_mcmcm <-  do.call(model_name, list(X, Y, ZZ))
 })
-# user    system elapsed 
-# 19.011   1.253  21.073 
+# user      system  elapsed 
+# 159.670   5.616   171.408 
+
+system.time ({
+  model_map <-  do.call(model_name, list(X, Y))
+  model_map_prediction <-  predict(model_map, ZZ)
+})
+# user     system elapsed 
+# 18.978   1.155  20.899 
+
+r <-  GetBestPredictions(model_map_prediction)
+gp_model <- model_map_prediction
+dim(ZZ)
+
+hist((gp_model$ZZ.km - gp_model$ZZ.mean))
+
+plot(gp_model$ZZ.km)
+plot(gp_model$ZZ.mean)
+
+
+means <- gp_model$ZZ.mean
+length(means)
+stds <- sqrt(gp_model$ZZ.ks2)
+length(stds)
+dt <- data.table(gp_model$XX)
+dt[, LB:= means - s * stds]
+col_names <- c(grep('^C', names(dt), value = T))
+dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names]
+
 
 
   
+with(test, {
+ plot(covariates, res$bgp$A_pred, pch=19)
+ plot(covariates, , pch=19, col=2)
+})
+
 par(mfrow=c(1,2))
 plot(test$covariates,  res$ko$A_pred, main=res$ko$Q)
 plot(test$covariates,  res$bgp$A_pred, main=res$bgp$Q)
@@ -1103,9 +1144,49 @@ with(test, plot(res$bgp$A_pred, covariates))
 
 # OUR model on Kosorok data -----------------------------------------------
   
-n_samples <- 300
-n_test_samples <- 200
-n_covariates <- 10
+
+
+
+Scenario1Enriched <- function(size,ncov,seed){
+  GetOptimalTreatment <- function(X) {
+    1 + 0.5*X[,2] + 0.5*X[,1]
+  }
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
+  A = runif(size,0,2)
+  D_opt =  GetOptimalTreatment(X)
+  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
+    8 + 4*X[,1] - 2*X[,2] - 2*X[,3] - 25*((A_opt-A)^2)
+  }
+  mu <- GetQFunctionValues(X, A)
+  R = rnorm(length(mu),mu,1)
+  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
+                  GetQFunctionValues=GetQFunctionValues, 
+                  GetOptimalTreatment=GetOptimalTreatment)
+  return(datainfo)
+}
+
+
+Scenario2Enriched <- function(size,ncov,seed){
+  GetOptimalTreatment <- function(X) {
+    I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) + 
+    X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
+  }
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
+  A = runif(size,0,2)
+  D_opt = GetOptimalTreatment(X)
+  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
+     8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(D_opt-A)
+  }
+  mu =   GetQFunctionValues(X, A)
+  R = rnorm(length(mu),mu,1)
+  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
+                  GetQFunctionValues=GetQFunctionValues, 
+                  GetOptimalTreatment=GetOptimalTreatment)
+  return(datainfo)
+}
+
 
 Scenario4Enriched <- function(size,ncov,seed){
   set.seed(seed)
@@ -1127,19 +1208,87 @@ Scenario4Enriched <- function(size,ncov,seed){
   return(datainfo)
 }
 
-ko_train <- Scenario4Enriched(size = n_samples, ncov = n_covariates, seed = 0)
-ko_test <- Scenario4Enriched(size = n_test_samples, ncov = n_covariates, seed = 1)
+n_samples <- 100
+n_test_samples <- 200
+n_covariates <- 10
+
+GenData <- Scenario1Enriched
+ko_train <- GenData(size = n_samples, ncov = n_covariates, seed = 0)
+ko_test <- GenData(size = n_test_samples, ncov = n_covariates, seed = 1)
 train <- ChangeFormatFromChenEnrichedToOur(ko_train)
 test <- ChangeFormatFromChenEnrichedToOur(ko_test)
 
 res_ko_data <- list()
 res_ko_data$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
-res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
-res_ko_data$bgp_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "bgp")
 
-res_ko_data$ko$Q
-res_ko_data$bgp$Q
-res_ko_data$bgp_s0$Q
+res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
+res_ko_data$bgpllm <- GetGPValueAndPredictedDose(train, test,  model_name = "bgpllm")
+res_ko_data$btgp <- GetGPValueAndPredictedDose(train, test, model_name = "btgp")
+res_ko_data$btgpllm <- GetGPValueAndPredictedDose(train, test, model_name = "btgpllm")
+
+for (n in names(res_ko_data)){
+  Q = res_ko_data[[n]]$Q
+  print(paste(n, ":  Q = ", Q))
+}
+
+
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_50_teset_200_covars_30")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_50_teset_200_covars_10")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_100_teset_200_covars_10")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_100_teset_200_covars_30")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_200_teset_200_covars_30")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_300_teset_200_covars_30")
+# saveRDS(res_ko_data, file = "../data/scenario_1_train_800_teset_200_covars_30")
+
+# saveRDS(res_ko_data, file = "../data/scenario_2_train_50_teset_200_covars_10") 
+# saveRDS(res_ko_data, file = "../data/scenario_2_train_100_teset_200_covars_10")  # we are better !
+# saveRDS(res_ko_data, file = "../data/scenario_2_train_200_teset_200_covars_10")
+# saveRDS(res_ko_data, file = "../data/scenario_2_train_300_teset_200_covars_10")
+
+# saveRDS(res_ko_data, file = "../data/scenario_4_train_100_teset_200_covars_10")  # we loose
+# saveRDS(res_ko_data, file = "../data/scenario_4_train_200_teset_200_covars_10")  # we win
+# saveRDS(res_ko_data, file = "../data/scenario_4_train_300_teset_200_covars_10")
+# saveRDS(res_ko_data, file = "../data/scenario_4_train_800_teset_200_covars_10")
+
+
+
+library(gtools) # for mixedsort
+
+res <- list()
+for (sc in c("scenario_1, scenario_2, scenario_4")) {
+  files <- grep(sc, list.files("../data/"), value = T)
+  counter <- 1
+  for (f in mixedsort(files)) {
+    s <-  readRDS(paste("../data/", f, sep = ""))
+    for (n in names(s)){
+      res[[sc]][[]]s[[n]]$Q
+      print(paste(n, ":  Q = ", s[[n]]$Q))
+    }
+    for (n in names(s)){
+      print(paste(n, ":  Q = ", s[[n]]$Q))
+    }
+    cat("\n\n")
+    counter <- counter
+  }
+}
+
+
+files <- grep("scenario", list.files("../data/"), value = T)
+for (f in mixedsort(files)) {
+  cat(f, "\n")
+  s <-  readRDS(paste("../data/", f, sep = ""))
+  for (n in names(s)){
+    print(paste(n, ":  Q = ", s[[n]]$Q))
+  }
+  cat("\n\n")
+}
+
+
+
+res_ko_data$bgp_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "bgp")
+res_ko_data$bgpllm_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "bgpllm")
+res_ko_data$btgp_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "btgp")
+res_ko_data$btgpllm_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "btgpllm")
 
 
 plot(ko_test$D_opt - res_ko_data$ko$A_pred)
