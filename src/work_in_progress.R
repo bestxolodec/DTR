@@ -1056,13 +1056,7 @@ plot_ly(df, x = ~x, y = ~y, z = ~z) %>% add_markers()
 #  KO-Learning on OUR data ------------------------------------------------ 
 
 
-      
-
-
-
-#############         Without Noise        ###############
-
-n_samples <- 50
+n_samples <- 100
 n_test_samples <- 100
 noise.sd <- 0
 
@@ -1089,12 +1083,14 @@ A_grid  <- data.table(rep(A_grid, nrow(ZZ)))
 ZZ <- ZZ[rep(seq.int(1, nrow(ZZ)), each=granularity), ]
 ZZ[, A:=A_grid]
 
-
 system.time ({
   model_mcmcm <-  do.call(model_name, list(X, Y, ZZ))
 })
 # user      system  elapsed 
 # 159.670   5.616   171.408 
+system.time ({
+  model_mcmcm <-  do.call(model_name, list(X, Y, ZZ, pred.n=F))
+})
 
 system.time ({
   model_map <-  do.call(model_name, list(X, Y))
@@ -1107,7 +1103,7 @@ r <-  GetBestPredictions(model_map_prediction)
 gp_model <- model_map_prediction
 dim(ZZ)
 
-hist((gp_model$ZZ.km - gp_model$ZZ.mean))
+plot((gp_model$ZZ.km - gp_model$ZZ.mean))
 
 plot(gp_model$ZZ.km)
 plot(gp_model$ZZ.mean)
@@ -1211,6 +1207,7 @@ Scenario4Enriched <- function(size,ncov,seed){
 n_samples <- 100
 n_test_samples <- 200
 n_covariates <- 10
+
 
 GenData <- Scenario1Enriched
 ko_train <- GenData(size = n_samples, ncov = n_covariates, seed = 0)

@@ -502,7 +502,8 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
 
 GetBestPredictions <- function(gp_model, s = 2, krige=F) {
   if (krige) {
-    
+    means <- gp_model$ZZ.mean
+    stds <- sqrt(gp_model$ZZ.s2)
   }
   means <- gp_model$ZZ.mean
   stds <- sqrt(gp_model$ZZ.s2)
@@ -513,9 +514,11 @@ GetBestPredictions <- function(gp_model, s = 2, krige=F) {
   return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
 }
 
+
 GetValueOfPredictedA <- function(best.estim.dt, data.obj)  {
   best.estim.dt[, mean(data.obj$GetQFunctionValues(C, A_pred))]
 }
+
 
 PlotDecisionSurface <- function(models, s=2) {
   for(m_name in names(models)) {
@@ -584,32 +587,6 @@ ChangeFormatFromOurToChenEnriched <- function(our_data) {
 
 
 
-# EnrhichChenDataWithQfunction <- function(chen_data) {
-#   stopifnot(!is.null(chen_data$GetQFunctionValues))
-#   stopifnot(!is.null(chen_data$GetOptimalTreatment))
-#   
-#   if (!is.null(chen_data$GetQFunctionValues)) {
-#     chen_data$GetQFunctionValues <- chen_data$GetQFunctionValues
-#   } else {
-#     warning("This function works only for scenario.4! Don't use it for anything else!!!")
-#     chen_data$GetQFunctionValues <- function(X, A, A_opt=chen_data$D_opt){
-#       stopifnot(is.matrix(X))
-#       8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(A_opt-A)
-#     }
-#   }
-#   if (!is.null(chen_data$GetOptimalTreatment)) {
-#     chen_data$GetOptimalTreatment <- chen_data$GetOptimalTreatment
-#   } else {
-#     warning("This function works only for scenario.4! Don't use it for anything else!!!")
-#     chen_data$GetOptimalTreatment <- function(X) {
-#       stopifnot(is.matrix(X))
-#       I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) + 
-#         X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
-#     }
-#   }
-#   return (chen_data)
-# }
-
 
 ChangeFormatFromChenEnrichedToOur <- function(chen_data, eps=0.01) {
   with(chen_data, list(covariates=X, treatment=A, raw.reward=R, 
@@ -627,6 +604,7 @@ pred_s4 <- function(model,test) {
 }
 
 
+
 GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
   train$weight = with(train, R - min(quantile(R, q),0))
   index = with(train, which(R > quantile(R,q)))
@@ -636,37 +614,74 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 }
 
 
-GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, MAP=F, s=2, eps=0.1) {
-  stopifnot(is.character(model_name))
+GetCovarsTreatsMeshGrid <-  function(train, test, eps, max_granularity=80) {
+  # Returns:
+  #   X - data.frame with covariates and treatment from train
+  #   Z - rewards from train
+  #   XX - data.table with 80 different tretment values for each object from test
   n_samples <- length(train$reward)
   X <- with(train, data.frame(C=covariates, A=treatment))
-  Y <- train$reward
-  granularity <- min(n_samples, 80)
+  Z <- train$reward
+  granularity <- min(n_samples, max_granularity)
   A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
-  ZZ <-  data.table(C = test$covariates)
-  A_grid  <- data.table(rep(A_grid, nrow(ZZ)))
-  ZZ <- ZZ[rep(seq.int(1, nrow(ZZ)), each=granularity), ]
-  ZZ[, A:=A_grid]
-  model <- do.call(model_name, list(X,Y,ZZ)) 
-  res_dt <- GetBestPredictions(model, s=s)
-  col_names <- c(grep('^C', names(res_dt), value = T))
+  XX <-  data.table(C = test$covariates)
+  A_grid  <- data.table(rep(A_grid, nrow(XX)))
+  XX <- XX[rep(seq.int(1, nrow(XX)), each=granularity), ]
+  XX[, A:=A_grid]
+  return(list(X=X, Z=Z, XX=ZZ))
+}
+
+
+GetPredValue <-  function(mesh_grid_with_pred) {
+  col_names <- c(grep('^C', names(mesh_grid_with_pred), value = T))
   stopifnot(length(col_names) > 0)
-  C_matrix <-  as.matrix(res_dt[, col_names, with=F]) 
-  pred_value <- mean(test$GetQFunctionValues(C_matrix, res_dt$A_pred))
+  C_matrix <-  as.matrix(mesh_grid_with_pred[, col_names, with=F]) 
+  return(mean(test$GetQFunctionValues(C_matrix, mesh_grid_with_pred$A_pred)))
+}
+
+
+GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, use_MAP=F, s=2, eps=0.1) {
+  stopifnot(is.character(model_name))
+  data.list <- GetCovarsTreatsMeshGrid(train, test, eps)
+  model <- do.call(model_name, data.list) 
+  res_dt <- GetBestPredictions(model, s=s)
+  pred_value <- GetPredValue(res_dt)
   return(list(A_pred=res_dt$A_pred, Q=pred_value))
 }
 
 
 
 
-function(gp_model, s = 2) {
-  means <- gp_model$ZZ.mean
-  stds <- sqrt(gp_model$ZZ.s2)
-  dt <- data.table(gp_model$XX)
-  dt[, LB:= means - s * stds]
-  col_names <- c(grep('^C', names(dt), value = T))
-  return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
