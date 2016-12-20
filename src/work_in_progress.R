@@ -1072,32 +1072,40 @@ res$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
 
 
 model_name <- "bgp"
-eps <- 0.1
-n_samples <- length(train$reward)
-X <- with(train, data.frame(C=covariates, A=treatment))
-Y <- train$reward
-granularity <- min(n_samples, 80)
-A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
-ZZ <-  data.table(C = test$covariates)
-A_grid  <- data.table(rep(A_grid, nrow(ZZ)))
-ZZ <- ZZ[rep(seq.int(1, nrow(ZZ)), each=granularity), ]
-ZZ[, A:=A_grid]
 
+data_list <- GetMeshGridOfCovarsTreats(train, test, eps)
+str(data_list)
+preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP=F, use_krige=F)
+mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
+pred_value <- GetPredValue(mesh_grid_with_pred, test)
+return(list(A_pred=mesh_grid_with_pred$A_pred, Q=pred_value, model=preds_on_test$model))
+
+
+
+
+
+data.list <- GetCovarsTreatsMeshGrid(train, test, 0.1)
+model_name <- "bgp"
 system.time ({
   model_mcmcm <-  do.call(model_name, list(X, Y, ZZ))
 })
 # user      system  elapsed 
 # 159.670   5.616   171.408 
+
 system.time ({
-  model_mcmcm <-  do.call(model_name, list(X, Y, ZZ, pred.n=F))
+  model_mcmcm <-  do.call(model_name, list(X, Y, ZZ, pred.n=F, verb=4))
 })
 
 system.time ({
-  model_map <-  do.call(model_name, list(X, Y))
-  model_map_prediction <-  predict(model_map, ZZ)
+  model_map <-  do.call(model_name, data.list[-3])
+  model_map_prediction <-  predict(model_map, data.list[[3]])
 })
 # user     system elapsed 
 # 18.978   1.155  20.899 
+
+model_map_prediction <-  predict(model_map, data.list$XX, R = 0)
+model_map_prediction$ZZ.km
+model_map_prediction$ZZ.mean
 
 r <-  GetBestPredictions(model_map_prediction)
 gp_model <- model_map_prediction
@@ -1140,7 +1148,6 @@ with(test, plot(res$bgp$A_pred, covariates))
 
 # OUR model on Kosorok data -----------------------------------------------
   
-
 
 
 Scenario1Enriched <- function(size,ncov,seed){
@@ -1204,8 +1211,8 @@ Scenario4Enriched <- function(size,ncov,seed){
   return(datainfo)
 }
 
-n_samples <- 100
-n_test_samples <- 200
+n_samples <- 50
+n_test_samples <- 50
 n_covariates <- 10
 
 
@@ -1217,6 +1224,10 @@ test <- ChangeFormatFromChenEnrichedToOur(ko_test)
 
 res_ko_data <- list()
 res_ko_data$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
+
+
+data.list <- GetCovarsTreatsMeshGrid(train, test, eps)
+model <- do.call(model_name, data.list) 
 
 res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
 res_ko_data$bgpllm <- GetGPValueAndPredictedDose(train, test,  model_name = "bgpllm")

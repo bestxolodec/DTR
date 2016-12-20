@@ -500,14 +500,13 @@ rq.wfit.with.weights <- function (x, y, tau = 0.5, weights, method = "br", ...) 
 
 
 
-GetBestPredictions <- function(gp_model, s = 2, krige=F) {
-  if (krige) {
-    means <- gp_model$ZZ.mean
-    stds <- sqrt(gp_model$ZZ.s2)
-  }
+GetBestPredictions <- function(gp_model, s = 2) {
+  # almost the same as GetArgmaxTreatmentsAndMaxLowerBounds
+  # left for compatability
+  warning("GetBestPredictions is deprecated,
+          use GetArgmaxTreatmentsAndMaxLowerBounds instead!")
   means <- gp_model$ZZ.mean
   stds <- sqrt(gp_model$ZZ.s2)
-  
   dt <- data.table(gp_model$XX)
   dt[, LB:= means - s * stds]
   col_names <- c(grep('^C', names(dt), value = T))
@@ -614,8 +613,17 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 }
 
 
-GetCovarsTreatsMeshGrid <-  function(train, test, eps, max_granularity=80) {
-  # Returns:
+
+
+
+
+
+
+
+
+
+GetMeshGridOfCovarsTreats <- function(train, test, eps, max_granularity=80) {
+  # Returns list of:
   #   X - data.frame with covariates and treatment from train
   #   Z - rewards from train
   #   XX - data.table with 80 different tretment values for each object from test
@@ -628,11 +636,10 @@ GetCovarsTreatsMeshGrid <-  function(train, test, eps, max_granularity=80) {
   A_grid  <- data.table(rep(A_grid, nrow(XX)))
   XX <- XX[rep(seq.int(1, nrow(XX)), each=granularity), ]
   XX[, A:=A_grid]
-  return(list(X=X, Z=Z, XX=ZZ))
+  return(list(X=X, Z=Z, XX=XX))
 }
 
-
-GetPredValue <-  function(mesh_grid_with_pred) {
+GetPredValue <-  function(mesh_grid_with_pred, test) {
   col_names <- c(grep('^C', names(mesh_grid_with_pred), value = T))
   stopifnot(length(col_names) > 0)
   C_matrix <-  as.matrix(mesh_grid_with_pred[, col_names, with=F]) 
@@ -640,13 +647,41 @@ GetPredValue <-  function(mesh_grid_with_pred) {
 }
 
 
-GetGPValueAndPredictedDose <- function(train, test, model_name=NULL, use_MAP=F, s=2, eps=0.1) {
+GetArgmaxTreatmentsAndMaxLowerBounds <- function(preds_on_test, s = 1.96) {
+  dt <- data.table(preds_on_test$model$XX)
+  with(preds_on_test,  dt[, LB:= means - s * sqrt(vars)])
+  col_names <- c(grep('^C', names(dt), value = T))
+  return(dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
+}
+
+
+
+FitGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
+  # Returns list of:
+  #   means - mean prediction (expected means in case of use_krige)
+  #   vars - variances in prediction points (expected vars in case of use_krig)
+  #   model - fitted model
+  if (use_MAP) {
+    model <- do.call(model_name, with(data_list, list(X, Z)))
+    model <- predict(model, data_list$ZZ)
+  } else {
+    model <- do.call(model_name, data_list) 
+  }
+  if (use_krige) {
+    return (list(means=model$ZZ.km, vars=model$ZZ.ks2, model=model))
+  } else {
+    return (list(means=model$ZZ.mean, vars=model$ZZ.s2, model=model))
+  }
+}
+
+
+GetGPValueAndPredictedDose <- function(train, test, model_name, use_MAP=F, use_krige=F, s=2, eps=0.1) {
   stopifnot(is.character(model_name))
-  data.list <- GetCovarsTreatsMeshGrid(train, test, eps)
-  model <- do.call(model_name, data.list) 
-  res_dt <- GetBestPredictions(model, s=s)
-  pred_value <- GetPredValue(res_dt)
-  return(list(A_pred=res_dt$A_pred, Q=pred_value))
+  data_list <- GetMeshGridOfCovarsTreats(train, test, eps)
+  preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP, use_krige)
+  mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
+  pred_value <- GetPredValue(mesh_grid_with_pred, test)
+  return(list(A_pred=mesh_grid_with_pred$A_pred, Q=pred_value, model=preds_on_test$model))
 }
 
 
