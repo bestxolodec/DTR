@@ -622,17 +622,18 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 
 
 
-GetMeshGridOfCovarsTreats <- function(train, test, eps, max_granularity=80) {
+GetListOfTrainTestData <- function(train, test, eps, max_granularity=80) {
   # Returns list of:
   #   X - data.frame with covariates and treatment from train
   #   Z - rewards from train
-  #   XX - data.table with 80 different tretment values for each object from test
+  #   XX - data.table with `max_granularity` different tretment values per object from test
   n_samples <- length(train$reward)
   X <- with(train, data.frame(C=covariates, A=treatment))
+  print("Here")
   Z <- train$reward
   granularity <- min(n_samples, max_granularity)
   A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
-  XX <-  data.table(C = test$covariates)
+  XX <- data.table(data.frame(C = test$covariates))
   A_grid  <- data.table(rep(A_grid, nrow(XX)))
   XX <- XX[rep(seq.int(1, nrow(XX)), each=granularity), ]
   XX[, A:=A_grid]
@@ -662,10 +663,10 @@ FitGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
   #   vars - variances in prediction points (expected vars in case of use_krig)
   #   model - fitted model
   if (use_MAP) {
-    model <- do.call(model_name, with(data_list, list(X, Z)))
-    model <- predict(model, data_list$ZZ)
+    model <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4, krige=use_krige)))
+    model <- predict(model, data_list$XX, krige=use_krige)
   } else {
-    model <- do.call(model_name, data_list) 
+    model <- do.call(model_name, c(data_list, pred.n=FALSE))
   }
   if (use_krige) {
     return (list(means=model$ZZ.km, vars=model$ZZ.ks2, model=model))
@@ -675,9 +676,11 @@ FitGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
 }
 
 
+
+
 GetGPValueAndPredictedDose <- function(train, test, model_name, use_MAP=F, use_krige=F, s=2, eps=0.1) {
   stopifnot(is.character(model_name))
-  data_list <- GetMeshGridOfCovarsTreats(train, test, eps)
+  data_list <- GetListOfTrainTestData(train, test, eps)
   preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP, use_krige)
   mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
   pred_value <- GetPredValue(mesh_grid_with_pred, test)

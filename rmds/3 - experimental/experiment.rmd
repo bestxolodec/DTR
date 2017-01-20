@@ -1,0 +1,122 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(MASS) 
+out <- btgpllm(X=mcycle[,1], Z=mcycle[,2], bprior="b0", pred.n=FALSE, verb=0)
+XX <- seq(2.4, 56.7, length=200) 
+
+out.kp <- predict(out, XX=XX, pred.n=FALSE) # MAP, kriging
+out.p <- predict(out, XX=XX, pred.n=FALSE, BTE=c(0,1000,1), verb=4) # sample from MAP
+out2 <- predict(out, XX, pred.n=FALSE, BTE=c(0,2000,2), MAP=FALSE, verb=4) # sample from distrib
+```
+
+
+```{r}
+n_samples <- 100
+n_test_samples <- 100
+noise.sd <- 0
+scenario <- "shvechikov.2"
+
+
+train <- GetSimulationData(sd=noise.sd, sample.size = n_samples, scenario = scenario )
+test <- GetSimulationData(sd=noise.sd, sample.size = n_test_samples, scenario = scenario)
+data_list <- GetListOfTrainTestData(train, test, eps)
+
+model_name <- "bgp"
+
+# model_joint <- do.call(model_name, c(data_list, pred.n=FALSE))
+# plot(model_joint) # this is almost the same as the following
+# plot(model_joint, center="km", as="ks2")
+```
+
+
+
+MAP model is working wery strange. Despite the number of samples used to refine map estimate of the parameters. 
+```{r}
+out <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4, s2.p=c(0.001, 0.001), s2.lam=c(0.001, 0.001), d.p	= c(.001,.001,.001,.001), nug.p = c(.001,.001,.001,.001))))
+out_kp <- predict(model_map, XX=data_list$XX, pred.n=FALSE)
+out_map_sample <- predict(model_map, XX=data_list$XX, pred.n=FALSE, BTE=c(0,1000,1))
+out_sample <- predict(model_map, XX=data_list$XX, pred.n=FALSE, BTE=c(0,2000,2), MAP=F)
+
+
+
+plot(out_kp)
+plot(out_kp,  center="km", as="ks2")
+plot(out_map_sample)
+plot(out_map_sample,  center="km", as="ks2")
+plot(out_sample)
+plot(out_sample,  center="km", as="ks2")
+```
+
+
+```{r}
+library(GPfit)
+
+gp_r_xa <- with(data_list, GP_fit(X, Z, corr=list(type="exponential",power=2)))
+plot(gp_r_xa)
+```
+
+
+
+```{r}
+model_joint <- do.call(model_name, c(data_list, list(BTE=c(1000,3000,2)), pred.n=FALSE))
+plot(model_joint) # this is almost the same as the following
+plot(model_joint, center="km", as="ks2")
+
+with(model_joint, plot(model_joint$ZZ.km - model_joint$ZZ.mean))
+# with(model_joint, plot(model_joint$ZZ.vark - model_joint$ZZ.s2)
+```
+
+
+```{r}
+library(GPfit)
+model_mle <- with(data_list, GP_fit(X, Z, corr=list(type="exponential",power=2)))
+preds <- predict(model_mle, data_list$XX)
+
+plot(model_mle, surf_check=TRUE)
+
+model_mle
+
+colnames(data_list$XX)
+```
+
+
+```{r}
+plot(model_mle)
+str(preds$complete_data)
+```
+
+
+```{r}
+PlotDecisionSurfaceForMLEGP <- function(model, s=2) {
+    surf <- matrix(m$ZZ.mean - s * sqrt(m$ZZ.s2), nrow=length(unique(m$XX$A)))
+    plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  
+                      ylab="A", main=paste("Decision Surface, s = ", s))
+    plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main=m_name, 
+                      par.settings = list(axis.line = list(col = "transparent")))
+    grid.arrange(plt1, plt2, ncol=2)
+  }
+}
+
+```
+
+
+
+```{r}
+library(mlegp)
+model_mle <-  with(data_list, mlegp(X, Z,  constantMean = 0))
+preds_mle <- predict(model_mle, as.matrix(data_list$XX), se.fit = T)
+
+
+summary(model_mle)
+plot(model_mle)
+preds_mle
+```
+
+
+
+
+

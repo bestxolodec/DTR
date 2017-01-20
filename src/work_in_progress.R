@@ -1052,29 +1052,69 @@ plot_ly(df, x = ~x, y = ~y, z = ~z) %>% add_markers()
 
 #################        NEW ERA          ###################
 
-
 #  KO-Learning on OUR data ------------------------------------------------ 
-
 
 n_samples <- 100
 n_test_samples <- 100
 noise.sd <- 0
+scenario <- "shvechikov.1"
 
-train <- GetSimulationData(sd=noise.sd, sample.size = n_samples, scenario = "shvechikov.1")
-test <- GetSimulationData(sd=noise.sd, sample.size = n_test_samples, scenario = "shvechikov.1")
+
+train <- GetSimulationData(sd=noise.sd, sample.size = n_samples, scenario = scenario )
+test <- GetSimulationData(sd=noise.sd, sample.size = n_test_samples, scenario = scenario)
 ko_train <- ChangeFormatFromOurToChenEnriched(train)
 ko_test <- ChangeFormatFromOurToChenEnriched(test)
+
 
 res <- list()
 # possible problem here - we are making max(0, min(pred, 2))
 res$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
-res$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
+
+# res$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
+
+# data_list <- GetListOfTrainTestData(train, test, eps)
+# str(data_list)
+
 
 
 model_name <- "bgp"
+model_joint <- do.call(model_name, c(data_list, pred.n=FALSE))
+plot(model_joint)
+plot(model_joint, center="km", as="ks2")
 
-data_list <- GetMeshGridOfCovarsTreats(train, test, eps)
-str(data_list)
+model_map <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4)))
+out.kp <- predict(model, data_list$XX, krige=use_krige)
+str(model_map$X)
+str(data_list$XX)
+
+plot(out.kp)
+plot(out.kp, center="km", as="ks2")
+
+
+
+with(test, plot(test$covariates, test$optimal.treatment))
+
+
+
+
+
+
+
+
+
+
+if (use_MAP) {
+  model <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4)))
+} else {
+  model <- do.call(model_name, c(data_list, pred.n=FALSE))
+}
+if (use_krige) {
+  return (list(means=model$ZZ.km, vars=model$ZZ.ks2, model=model))
+} else {
+  return (list(means=model$ZZ.mean, vars=model$ZZ.s2, model=model))
+}
+}
+
 preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP=F, use_krige=F)
 mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
 pred_value <- GetPredValue(mesh_grid_with_pred, test)
@@ -1211,12 +1251,12 @@ Scenario4Enriched <- function(size,ncov,seed){
   return(datainfo)
 }
 
-n_samples <- 50
-n_test_samples <- 50
+n_samples <- 100
+n_test_samples <- 200
 n_covariates <- 10
 
 
-GenData <- Scenario1Enriched
+GenData <- Scenario4Enriched
 ko_train <- GenData(size = n_samples, ncov = n_covariates, seed = 0)
 ko_test <- GenData(size = n_test_samples, ncov = n_covariates, seed = 1)
 train <- ChangeFormatFromChenEnrichedToOur(ko_train)
@@ -1225,14 +1265,14 @@ test <- ChangeFormatFromChenEnrichedToOur(ko_test)
 res_ko_data <- list()
 res_ko_data$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
 
+use_MAP = T; use_krige = T
+res_ko_data$bgp_map_not_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
+res_ko_data$bgp_map_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
 
-data.list <- GetCovarsTreatsMeshGrid(train, test, eps)
-model <- do.call(model_name, data.list) 
-
-res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
-res_ko_data$bgpllm <- GetGPValueAndPredictedDose(train, test,  model_name = "bgpllm")
-res_ko_data$btgp <- GetGPValueAndPredictedDose(train, test, model_name = "btgp")
-res_ko_data$btgpllm <- GetGPValueAndPredictedDose(train, test, model_name = "btgpllm")
+res_ko_data$bgpllm <- GetGPValueAndPredictedDose(train, test,  model_name = "bgpllm", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$btgp <- GetGPValueAndPredictedDose(train, test, model_name = "btgp", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$btgpllm <- GetGPValueAndPredictedDose(train, test, model_name = "btgpllm", use_MAP = use_MAP, use_krige = use_krige)
 
 for (n in names(res_ko_data)){
   Q = res_ko_data[[n]]$Q
@@ -1307,5 +1347,25 @@ sum((test$optimal.treatment - res_ko_data$ko$A_pred)**2)
 sum((test$optimal.treatment - res_ko_data$bgp$A_pred)**2)
 
 with(res_ko_data, plot(bgp$A_pred, ko$A_pred))
+
+
+res_ko_data$bgp_map_not_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
+
+model <- do.call(model_name, with(data_list, list(X, Z, trace=T)))
+
+
+
+
+xspace = seq(from=0,to=1,length.out = 50)
+plot(xspace, dbeta(xspace, 1, 10), type="l")
+plot(xspace, dbeta(xspace, 2, 1000), type="l")
+
+curve(dbeta(x, 1, .1))
+
+
+
+
+
+
 
 
