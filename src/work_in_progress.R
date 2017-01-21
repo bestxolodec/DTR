@@ -1057,7 +1057,7 @@ plot_ly(df, x = ~x, y = ~y, z = ~z) %>% add_markers()
 n_samples <- 100
 n_test_samples <- 100
 noise.sd <- 0
-scenario <- "shvechikov.1"
+scenario <- "shvechikov.2"
 
 
 train <- GetSimulationData(sd=noise.sd, sample.size = n_samples, scenario = scenario )
@@ -1070,27 +1070,34 @@ res <- list()
 # possible problem here - we are making max(0, min(pred, 2))
 res$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
 
-# res$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp")
+# res$bgp <- GetTGPValueAndPredictedDose(train, test, model_name = "bgp")
 
-# data_list <- GetListOfTrainTestData(train, test, eps)
-# str(data_list)
-
+data_list <- GetListOfTrainTestData(train, test, eps)
+str(data_list)
 
 
 model_name <- "bgp"
 model_joint <- do.call(model_name, c(data_list, pred.n=FALSE))
-plot(model_joint)
+plot(model_joint) # this is almost the same as the following
 plot(model_joint, center="km", as="ks2")
 
-model_map <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4)))
-out.kp <- predict(model, data_list$XX, krige=use_krige)
-str(model_map$X)
-str(data_list$XX)
 
+
+model_map$params
+
+model_map <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4)))
+model_map <- do.call(model_name,  with(data_list, list(X, Z, pred.n=T, verb=4)))
+out.kp <- predict(model_map, data_list$XX, krige=F)
 plot(out.kp)
 plot(out.kp, center="km", as="ks2")
 
 
+gp_r_xa <- GP_fit(X, Y, corr=list(type="exponential",power=2))
+plot(gp_r_xa)
+
+library(GPfit)
+gp_r_xa <- with(data_list, GP_fit(X, Z, corr=list(type="exponential",power=2)))
+plot(gp_r_xa)
 
 with(test, plot(test$covariates, test$optimal.treatment))
 
@@ -1115,8 +1122,8 @@ if (use_krige) {
 }
 }
 
-preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP=F, use_krige=F)
-mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
+preds_on_test <- FitTGPAndPredictOnTest(model_name, data_list, use_MAP=F, use_krige=F)
+mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBoundsTGP(preds_on_test, s=s)
 pred_value <- GetPredValue(mesh_grid_with_pred, test)
 return(list(A_pred=mesh_grid_with_pred$A_pred, Q=pred_value, model=preds_on_test$model))
 
@@ -1266,13 +1273,13 @@ res_ko_data <- list()
 res_ko_data$ko <- GetKOLearningValueAndPredictedDose(ko_train, ko_test)
 
 use_MAP = T; use_krige = T
-res_ko_data$bgp_map_not_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
-res_ko_data$bgp_map_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
-res_ko_data$bgp <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$bgp_map_not_krige <- GetTGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
+res_ko_data$bgp_map_krige <- GetTGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$bgp <- GetTGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = use_MAP, use_krige = use_krige)
 
-res_ko_data$bgpllm <- GetGPValueAndPredictedDose(train, test,  model_name = "bgpllm", use_MAP = use_MAP, use_krige = use_krige)
-res_ko_data$btgp <- GetGPValueAndPredictedDose(train, test, model_name = "btgp", use_MAP = use_MAP, use_krige = use_krige)
-res_ko_data$btgpllm <- GetGPValueAndPredictedDose(train, test, model_name = "btgpllm", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$bgpllm <- GetTGPValueAndPredictedDose(train, test,  model_name = "bgpllm", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$btgp <- GetTGPValueAndPredictedDose(train, test, model_name = "btgp", use_MAP = use_MAP, use_krige = use_krige)
+res_ko_data$btgpllm <- GetTGPValueAndPredictedDose(train, test, model_name = "btgpllm", use_MAP = use_MAP, use_krige = use_krige)
 
 for (n in names(res_ko_data)){
   Q = res_ko_data[[n]]$Q
@@ -1333,10 +1340,10 @@ for (f in mixedsort(files)) {
 
 
 
-res_ko_data$bgp_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "bgp")
-res_ko_data$bgpllm_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "bgpllm")
-res_ko_data$btgp_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "btgp")
-res_ko_data$btgpllm_s0 <- GetGPValueAndPredictedDose(train, test, s=0, model_name = "btgpllm")
+res_ko_data$bgp_s0 <- GetTGPValueAndPredictedDose(train, test, s=0, model_name = "bgp")
+res_ko_data$bgpllm_s0 <- GetTGPValueAndPredictedDose(train, test, s=0, model_name = "bgpllm")
+res_ko_data$btgp_s0 <- GetTGPValueAndPredictedDose(train, test, s=0, model_name = "btgp")
+res_ko_data$btgpllm_s0 <- GetTGPValueAndPredictedDose(train, test, s=0, model_name = "btgpllm")
 
 
 plot(ko_test$D_opt - res_ko_data$ko$A_pred)
@@ -1349,7 +1356,7 @@ sum((test$optimal.treatment - res_ko_data$bgp$A_pred)**2)
 with(res_ko_data, plot(bgp$A_pred, ko$A_pred))
 
 
-res_ko_data$bgp_map_not_krige <- GetGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
+res_ko_data$bgp_map_not_krige <- GetTGPValueAndPredictedDose(train, test, model_name = "bgp", use_MAP = T, use_krige = F)
 
 model <- do.call(model_name, with(data_list, list(X, Z, trace=T)))
 

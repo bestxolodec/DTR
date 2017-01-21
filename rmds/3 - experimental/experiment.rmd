@@ -17,7 +17,7 @@ out2 <- predict(out, XX, pred.n=FALSE, BTE=c(0,2000,2), MAP=FALSE, verb=4) # sam
 ```{r}
 n_samples <- 100
 n_test_samples <- 100
-noise.sd <- 0
+noise.sd <- 0.1
 scenario <- "shvechikov.2"
 
 
@@ -91,29 +91,58 @@ str(preds$complete_data)
 
 
 ```{r}
-PlotDecisionSurfaceForMLEGP <- function(model, s=2) {
-    surf <- matrix(m$ZZ.mean - s * sqrt(m$ZZ.s2), nrow=length(unique(m$XX$A)))
-    plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  
-                      ylab="A", main=paste("Decision Surface, s = ", s))
-    plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main=m_name, 
-                      par.settings = list(axis.line = list(col = "transparent")))
-    grid.arrange(plt1, plt2, ncol=2)
-  }
-}
 
+LCS=F
+XX <-  data_list$XX
+prediction <- preds_mle
+
+PlotDecisionSurfaceForMLEGP <- function(XX, prediction, s=2, LCS=F){
+  # LCS = lower confidence surface
+  surf <- if(LCS) prediction$fit - s * prediction$se.fit else prediction$fit
+  surf <- matrix(surf, nrow=length(unique(XX$A)))
+  
+  
+  plt1 <- levelplot(surf, col.regions = gray(0:100/100),  xlab="C",  
+                    ylab="A", main=paste("Decision Surface, s = ", s))
+  plt2 <- wireframe(surf, xlab="C", ylab="A", zlab="decision surf",  main="mle", 
+                    par.settings = list(axis.line = list(col = "transparent")))
+  grid.arrange(plt1, plt2, ncol=2)
+  
+}
 ```
 
 
 
 ```{r}
+GetArgmaxTreatmentsAndMaxLowerBoundsMLE <- function(XX, preds, s = 1.96) {
+  dt <- data.table(data.frame(XX, preds))
+  dt[, LB:= fit - s * se.fit]
+  col_names <- c(grep('^C', names(dt), value = T))
+  return (dt[, .(A_pred=A[which.max(LB)], LB_max=max(LB)), by=col_names])
+}
+```
+
+
+
+
+```{r}
 library(mlegp)
+
 model_mle <-  with(data_list, mlegp(X, Z,  constantMean = 0))
 preds_mle <- predict(model_mle, as.matrix(data_list$XX), se.fit = T)
 
 
+sapply(seq(0,2, length.out = 20),  
+
+plot(sapply(seq(0,2, length.out = 200), function(i) 
+            GetPredValue(GetArgmaxTreatmentsAndMaxLowerBoundsMLE(data_list$XX, preds_mle, s=i), test = test)))
+
+covs_with_pred <- GetArgmaxTreatmentsAndMaxLowerBoundsMLE(data_list$XX, preds_mle, s=i)
+Value <- GetPredValue(covs_with_pred, test)
+
+
 summary(model_mle)
 plot(model_mle)
-preds_mle
 ```
 
 

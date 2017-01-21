@@ -614,14 +614,6 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 
 
 
-
-
-
-
-
-
-
-
 GetListOfTrainTestData <- function(train, test, eps, max_granularity=80) {
   # Returns list of:
   #   X - data.frame with covariates and treatment from train
@@ -629,7 +621,6 @@ GetListOfTrainTestData <- function(train, test, eps, max_granularity=80) {
   #   XX - data.table with `max_granularity` different tretment values per object from test
   n_samples <- length(train$reward)
   X <- with(train, data.frame(C=covariates, A=treatment))
-  print("Here")
   Z <- train$reward
   granularity <- min(n_samples, max_granularity)
   A_grid <- with(train, seq(min(treatment)-eps, max(treatment)+eps, length.out = granularity))
@@ -640,15 +631,22 @@ GetListOfTrainTestData <- function(train, test, eps, max_granularity=80) {
   return(list(X=X, Z=Z, XX=XX))
 }
 
-GetPredValue <-  function(mesh_grid_with_pred, test) {
-  col_names <- c(grep('^C', names(mesh_grid_with_pred), value = T))
+
+GetPredValue <-  function(covs_with_pred, test) {
+  col_names <- c(grep('^C', names(covs_with_pred), value = T))
   stopifnot(length(col_names) > 0)
-  C_matrix <-  as.matrix(mesh_grid_with_pred[, col_names, with=F]) 
-  return(mean(test$GetQFunctionValues(C_matrix, mesh_grid_with_pred$A_pred)))
+  C_matrix <-  as.matrix(covs_with_pred[, col_names, with=F]) 
+  return(mean(test$GetQFunctionValues(C_matrix, covs_with_pred$A_pred)))
 }
 
 
-GetArgmaxTreatmentsAndMaxLowerBounds <- function(preds_on_test, s = 1.96) {
+
+
+##############       tgp specific   functions ####################
+
+
+
+GetArgmaxTreatmentsAndMaxLowerBoundsTGP <- function(preds_on_test, s = 1.96) {
   dt <- data.table(preds_on_test$model$XX)
   with(preds_on_test,  dt[, LB:= means - s * sqrt(vars)])
   col_names <- c(grep('^C', names(dt), value = T))
@@ -657,7 +655,7 @@ GetArgmaxTreatmentsAndMaxLowerBounds <- function(preds_on_test, s = 1.96) {
 
 
 
-FitGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
+FitTGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
   # Returns list of:
   #   means - mean prediction (expected means in case of use_krige)
   #   vars - variances in prediction points (expected vars in case of use_krig)
@@ -678,19 +676,23 @@ FitGPAndPredictOnTest <- function(model_name, data_list, use_MAP, use_krige) {
 
 
 
-GetGPValueAndPredictedDose <- function(train, test, model_name, use_MAP=F, use_krige=F, s=2, eps=0.1) {
+GetTGPValueAndPredictedDose <- function(train, test, model_name, use_MAP=F, use_krige=F, s=2, eps=0.1) {
   stopifnot(is.character(model_name))
   data_list <- GetListOfTrainTestData(train, test, eps)
-  preds_on_test <- FitGPAndPredictOnTest(model_name, data_list, use_MAP, use_krige)
-  mesh_grid_with_pred <- GetArgmaxTreatmentsAndMaxLowerBounds(preds_on_test, s=s)
-  pred_value <- GetPredValue(mesh_grid_with_pred, test)
-  return(list(A_pred=mesh_grid_with_pred$A_pred, Q=pred_value, model=preds_on_test$model))
+  preds_on_test <- FitTGPAndPredictOnTest(model_name, data_list, use_MAP, use_krige)
+  covs_with_pred <- GetArgmaxTreatmentsAndMaxLowerBoundsTGP(preds_on_test, s=s)
+  pred_value <- GetPredValue(covs_with_pred, test)
+  return(list(A_pred=covs_with_pred$A_pred, Q=pred_value, model=preds_on_test$model))
 }
 
 
 
 
 
+
+
+
+################## MLE ERA #################
 
 
 
