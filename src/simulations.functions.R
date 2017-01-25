@@ -577,14 +577,18 @@ FitAndPlotAllModels <- function(noise_sd=NULL, n_samples=100, scenario=NULL, s=2
 }
 
 
+
+
+
+# Data generation and prediction ------------------------------------------
+
+
 ChangeFormatFromOurToChenEnriched <- function(our_data) {
   with(our_data, list(X=covariates, A=treatment, R=raw.reward, D_opt=optimal.treatment, 
                       mu=GetQFunctionValues(covariates, treatment, optimal.treatment),
                       GetQFunctionValues=GetQFunctionValues, 
                       GetOptimalTreatment=GetOptimalTreatment))
 }
-
-
 
 
 ChangeFormatFromChenEnrichedToOur <- function(chen_data, eps=0.01) {
@@ -596,7 +600,8 @@ ChangeFormatFromChenEnrichedToOur <- function(chen_data, eps=0.01) {
 
 
 # slightly rewritten function from KO-learning pred_s2 to achieve flexibility
-pred_s4 <- function(model,test) {
+pred_ko <- function(model,test) {
+  warning("Clipping predicted treatment to [0,2]!")
   A_pred <- pmin(pmax(predict(model,test$X), 0), 2)
   pred_value <- with(test, mean(GetQFunctionValues(X, A_pred, D_opt)))
   return(list(A_pred=A_pred, Q=pred_value))
@@ -609,9 +614,83 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
   index = with(train, which(R > quantile(R,q)))
   model = with(train, svm(x = X[index,], y = A[index], w=weight[index],   
                           type="eps-regression", epsilon = 0.15, scale=FALSE))
-  return(pred_s4(model,test))
+  return(pred_ko(model,test))
 }
 
+
+
+
+
+
+
+
+Scenario1Enriched <- function(size,ncov,seed){
+  GetOptimalTreatment <- function(X) {
+    1 + 0.5*X[,2] + 0.5*X[,1]
+  }
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
+  A = runif(size,0,2)
+  D_opt =  GetOptimalTreatment(X)
+  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
+    8 + 4*X[,1] - 2*X[,2] - 2*X[,3] - 25*((A_opt-A)^2)
+  }
+  mu <- GetQFunctionValues(X, A)
+  R = rnorm(length(mu),mu,1)
+  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
+                  GetQFunctionValues=GetQFunctionValues, 
+                  GetOptimalTreatment=GetOptimalTreatment)
+  return(datainfo)
+}
+
+
+Scenario2Enriched <- function(size,ncov,seed){
+  GetOptimalTreatment <- function(X) {
+    I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) + 
+      X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
+  }
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
+  A = runif(size,0,2)
+  D_opt = GetOptimalTreatment(X)
+  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
+    8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(D_opt-A)
+  }
+  mu =   GetQFunctionValues(X, A)
+  R = rnorm(length(mu),mu,1)
+  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
+                  GetQFunctionValues=GetQFunctionValues, 
+                  GetOptimalTreatment=GetOptimalTreatment)
+  return(datainfo)
+}
+
+
+Scenario4Enriched <- function(size,ncov,seed){
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
+  GetOptimalTreatment <-function(X) {
+    I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) +
+      X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
+  }
+  D_opt = GetOptimalTreatment(X)
+  A = rtruncnorm(size,a=0,b=2,mean=D_opt,sd=0.5)
+  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
+    8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(A_opt-A)
+  }
+  mu = GetQFunctionValues(X, A)
+  R = rnorm(length(mu),mu,1)
+  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
+                  GetQFunctionValues=GetQFunctionValues, 
+                  GetOptimalTreatment=GetOptimalTreatment)
+  return(datainfo)
+}
+
+
+
+
+
+
+# Brute force prediction for GP -------------------------------------------
 
 
 GetListOfTrainTestData <- function(train, test, eps, max_granularity=80) {

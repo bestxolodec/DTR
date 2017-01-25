@@ -1197,67 +1197,6 @@ with(test, plot(res$bgp$A_pred, covariates))
   
 
 
-Scenario1Enriched <- function(size,ncov,seed){
-  GetOptimalTreatment <- function(X) {
-    1 + 0.5*X[,2] + 0.5*X[,1]
-  }
-  set.seed(seed)
-  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
-  A = runif(size,0,2)
-  D_opt =  GetOptimalTreatment(X)
-  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
-    8 + 4*X[,1] - 2*X[,2] - 2*X[,3] - 25*((A_opt-A)^2)
-  }
-  mu <- GetQFunctionValues(X, A)
-  R = rnorm(length(mu),mu,1)
-  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
-                  GetQFunctionValues=GetQFunctionValues, 
-                  GetOptimalTreatment=GetOptimalTreatment)
-  return(datainfo)
-}
-
-
-Scenario2Enriched <- function(size,ncov,seed){
-  GetOptimalTreatment <- function(X) {
-    I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) + 
-    X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
-  }
-  set.seed(seed)
-  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
-  A = runif(size,0,2)
-  D_opt = GetOptimalTreatment(X)
-  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
-     8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(D_opt-A)
-  }
-  mu =   GetQFunctionValues(X, A)
-  R = rnorm(length(mu),mu,1)
-  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
-                  GetQFunctionValues=GetQFunctionValues, 
-                  GetOptimalTreatment=GetOptimalTreatment)
-  return(datainfo)
-}
-
-
-Scenario4Enriched <- function(size,ncov,seed){
-  set.seed(seed)
-  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
-  GetOptimalTreatment <-function(X) {
-    I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) +
-    X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
-  }
-  D_opt = GetOptimalTreatment(X)
-  A = rtruncnorm(size,a=0,b=2,mean=D_opt,sd=0.5)
-  GetQFunctionValues <- function(X, A, A_opt=D_opt) {
-      8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(A_opt-A)
-  }
-  mu = GetQFunctionValues(X, A)
-  R = rnorm(length(mu),mu,1)
-  datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu, 
-                  GetQFunctionValues=GetQFunctionValues, 
-                  GetOptimalTreatment=GetOptimalTreatment)
-  return(datainfo)
-}
-
 n_samples <- 100
 n_test_samples <- 200
 n_covariates <- 10
