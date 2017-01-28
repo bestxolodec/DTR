@@ -1,6 +1,18 @@
 
 source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
 
+rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
+  if (length(n) > 1) 
+    n <- length(n)
+  if (length(n) > 1) 
+    n <- length(n)
+  else if (!is.numeric(n)) 
+    stop("non-numeric argument n.")
+  .Call("do_rtruncnorm", as.integer(n), a, b, mean, sd, PACKAGE="truncnorm")
+}
+
+
+
 GetRewardGivenQfunctionValuesAsMeanVec <- function(q.function.values, sd=1,
                                                    only.positive=TRUE, eps=0.01) {
   raw.reward <- rnorm(NROW(q.function.values), q.function.values, sd)

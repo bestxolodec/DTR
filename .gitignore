@@ -12,3 +12,5 @@ DIPLOMA.Rproj
 *.swp
 *.ipynb_checkpoints
 .RDataTmp
+.idea
+__pycache__
