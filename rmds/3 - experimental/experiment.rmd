@@ -41,29 +41,31 @@ saveRDS(object = data_list, file = "~/Desktop/data")
 
 ```{r}
 # read data
-data_list <- readRDS(file="~/Desktop/data") 
-
-# FIT models with different methods
-model_joint <- with(data_list, bgp(X, Z, XX, pred.n=F))
-out <- do.call(model_name,  with(data_list, list(X, Z, pred.n=FALSE, verb=4, 
-                                                 BTE=c(1000, 19000, 1))))
-# Predict 
-out_kp <- predict(out, XX=data_list$XX, pred.n=FALSE)
-out_map_sample <- predict(out, XX=data_list$XX, pred.n=FALSE, BTE=c(0,1000,1))
-out_sample <- predict(out, XX=data_list$XX, pred.n=FALSE, BTE=c(0,2000,2), MAP=F)
-
-# Plot
-plot(model_joint)
-plot(model_joint, center="km", as="ks2")
-
-plot(out_kp)
-plot(out_kp,  center="km", as="ks2")
-
-plot(out_map_sample)
-plot(out_map_sample,  center="km", as="ks2")
-
-plot(out_sample)
-plot(out_sample,  center="km", as="ks2")
+  library(tgp)
+  
+  data_list <- readRDS(file="~/Desktop/data") 
+  
+  # FIT models with different methods
+  model_joint <- with(data_list, bgp(X, Z, XX, pred.n=F))
+  out <- with(data_list, bgp(X, Z, pred.n=FALSE, verb=4, BTE=c(1000, 19000, 1)))
+  
+  # Predict 
+  out_kp <- predict(out, XX=data_list$XX, pred.n=FALSE)
+  out_map_sample <- predict(out, XX=data_list$XX, pred.n=FALSE, BTE=c(0,1000,1))
+  out_sample <- predict(out, XX=data_list$XX, pred.n=FALSE, BTE=c(0,2000,2), MAP=F)
+  
+  # Plot
+  plot(model_joint)
+  plot(model_joint, center="km", as="ks2")
+  
+  plot(out_kp)
+  plot(out_kp,  center="km", as="ks2")
+  
+  plot(out_map_sample)
+  plot(out_map_sample,  center="km", as="ks2")
+  
+  plot(out_sample)
+  plot(out_sample,  center="km", as="ks2")
 ```
 
 
