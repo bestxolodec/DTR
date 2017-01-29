@@ -194,7 +194,6 @@ Scenario2Enriched <- function(size,ncov,seed){
 }
 
 
-
 Scenario4Enriched <- function(size,ncov,seed){
   set.seed(seed)
   X = matrix(runif(size*ncov,-1,1),ncol=ncov)
@@ -215,6 +214,19 @@ Scenario4Enriched <- function(size,ncov,seed){
   return(datainfo)
   
 }
+
+## Sanity checks
+# check_function <- function(ko, o) {
+#   print(all.equal(o$X, ko$X))
+#   print(all.equal(o$A, ko$A))
+#   print(all.equal(o$R, ko$R))
+#   print(all.equal(o$D_opt, ko$D_opt))
+#   print(all.equal(o$mu, ko$mu))
+# }
+# check_function(Scenario1(100, 30, 0), Scenario1Enriched(100,30,0))
+# check_function(Scenario2(100, 30, 0), Scenario2Enriched(100,30,0))
+# check_function(Scenario4(100, 30, 0), Scenario4Enriched(100,30,0))
+
 
 
 # HOW TO USE : 

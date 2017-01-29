@@ -5,7 +5,11 @@ from matplotlib import pyplot as plt
 import scipy as sp
 
 
-def get_uniform_inducing_points(n_of_inducing, X):
+def get_initial_inducing(n_of_inducing, X):
+    from sklearn.cluster import KMeans
+    return KMeans(n_clusters=n_of_inducing, random_state=0, copy_x=False,
+                  max_iter=100, n_init=2).fit(X).cluster_centers_
+
     assert X.ndim == 2
     results = []
     for i in range(X.shape[1]):
@@ -25,17 +29,28 @@ def unpack_data_from_rpyobj(obj):
     return [ar.reshape(-1, 1) if ar.ndim == 1 else ar for ar in unpacked_seq]
 
 
-def predict_with_GP(X, Y, X_test, n_inducing=None):
+def fit_GP(X, Y, n_inducing=None):
     kern = gpy.kern.RBF(X.shape[1],  ARD=True)  # n_of_dimensions
     mf = Additive(Linear(X.shape[1],Y.shape[1]), Constant(X.shape[1],Y.shape[1]))
     if n_inducing is not None:  # doing sparse regression
-        Z = get_uniform_inducing_points(n_inducing, X)
+        Z = get_initial_inducing(n_inducing, X)
         # TODO: mean_function is not supported in default constructor
         m = gpy.models.SparseGPRegression(X, Y, kernel=kern, Z=Z)   # , mean_function=mf)
     else:
         m = gpy.models.GPRegression(X, Y, kern, mean_function=mf)
-    m.optimize()  # TODO: optimization  with restarts
-    return m.predict(X_test), m
+    # m.optimize()  # TODO: optimization  with restarts
+    m.optimize_restarts(num_restarts=1, num_processes=1, robust=True, verbose=False)
+    return m
+
+
+def predict_with_GP_lower_surface(m, X_test, s, granularity, space):
+    prediction = []
+    n_in_batch = 100 * granularity  # per batch prediction for memory saving
+    split_indexes = np.arange(n_in_batch, X_test.shape[0], n_in_batch)
+    for batch in np.array_split(X_test, split_indexes, axis=0):
+        ms, vs = [o.reshape(-1, granularity) for o in m.predict(batch)]
+        prediction.append(space[(ms - s * np.sqrt(vs)).argmax(axis=1)])
+    return np.array(prediction).reshape((-1, 1))
 
 
 def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
@@ -46,17 +61,15 @@ def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
 
 def get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s, n_inducing=None):
     X_mesh, space = get_mesh_of_cov_treat(C_test, a_min, a_max, granularity)
-    (ms, vs), m = predict_with_GP(X, R, X_mesh, n_inducing=n_inducing)
-    ms,  vs = [o.reshape(-1, granularity) for o in [ms, vs]]
-    lower_surface  = ms - s * np.sqrt(vs)
-    return space[lower_surface.argmax(axis=1)]
+    m = fit_GP(X, R, n_inducing=n_inducing)
+    return predict_with_GP_lower_surface(m, X_mesh, s, granularity, space)
 
 
 def np2r(array):
     from rpy2.robjects import r
     import rpy2.robjects.numpy2ri
     rpy2.robjects.numpy2ri.activate()
-    nr, nc = array.shape if array.ndim > 1 else array.size, 1
+    nr, nc = array.shape if array.ndim > 1 else (array.size, 1)
     array_r = r.matrix(array, nrow=nr, ncol=nc)
     return r.assign("array_r", array_r)
 
@@ -111,3 +124,6 @@ def generate_sample(n_of_train, a_max=100, a_min=0, verbose=False, seed=0):
     alphas = sp.stats.norm(0, 7).rvs(n_of_train).reshape(-1, 1)
     ls_a = sp.stats.gamma(1, scale=3).rvs(1)
     return space, A, alphas, ls_a
+
+
+print("itr.py is imported!")
