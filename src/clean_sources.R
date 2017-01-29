@@ -1,5 +1,6 @@
 
-source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
+# source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
+
 
 rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
   if (length(n) > 1) 
@@ -127,7 +128,7 @@ ChangeFormatFromChenEnrichedToOur <- function(chen_data, eps=0.01) {
 PredValueGeneral <- function(A_pred, test) {
   if ("covariates" %in% names(test)) {
     with(test, mean(GetQFunctionValues(covariates, A_pred, optimal.treatment)))
-  } else {
+  } else { # Chen notation
     with(test, mean(GetQFunctionValues(X, A_pred, D_opt)))
   }
 }
@@ -257,9 +258,6 @@ Scenario4Enriched <- function(size,ncov,seed){
 # ko_test <- GetData(n_test_samples, ncov = n_covariates, seed = 1)
 # train <- ChangeFormatFromChenEnrichedToOur(ko_train)
 # test <- ChangeFormatFromChenEnrichedToOur(ko_test)
-
-
-
 
 
 
