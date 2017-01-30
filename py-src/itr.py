@@ -3,7 +3,7 @@ from GPy.mappings import Linear, Constant, Additive
 import numpy as np
 from matplotlib import pyplot as plt
 import scipy as sp
-
+from collections import Iterable
 
 def get_initial_inducing(n_of_inducing, X):
     from sklearn.cluster import KMeans
@@ -43,14 +43,17 @@ def fit_GP(X, Y, n_inducing=None):
     return m
 
 
-def predict_with_GP_lower_surface(m, X_test, s, granularity, space):
+def predict_with_GP_lower_surface(m, X_test, s_vec, granularity, space):
+    assert isinstance(s_vec, Iterable)  # s_vec should be at least python list or np.array
     prediction = []
     n_in_batch = 100 * granularity  # per batch prediction for memory saving
     split_indexes = np.arange(n_in_batch, X_test.shape[0], n_in_batch)
     for batch in np.array_split(X_test, split_indexes, axis=0):
         ms, vs = [o.reshape(-1, granularity) for o in m.predict(batch)]
-        prediction.append(space[(ms - s * np.sqrt(vs)).argmax(axis=1)])
-    return np.array(prediction).reshape((-1, 1))
+        # lower_surf.shape = (s_factors, num of test objects, num of grid points)
+        lower_surf = ms - np.asarray(s_vec).reshape(-1, 1, 1) * np.sqrt(vs)
+        prediction.append(space[lower_surf.argmax(axis=-1).T])
+    return np.vstack(prediction) # shape = (num of test objects, s_factors)
 
 
 def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
@@ -59,10 +62,10 @@ def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
     return np.hstack([np.repeat(C, granularity, axis=0), np.tile(space, n_test).reshape(-1,1)]), space
 
 
-def get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s, n_inducing=None):
+def get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s_vec, n_inducing=None):
     X_mesh, space = get_mesh_of_cov_treat(C_test, a_min, a_max, granularity)
     m = fit_GP(X, R, n_inducing=n_inducing)
-    return predict_with_GP_lower_surface(m, X_mesh, s, granularity, space)
+    return predict_with_GP_lower_surface(m, X_mesh, s_vec, granularity, space)
 
 
 def np2r(array):
@@ -74,14 +77,15 @@ def np2r(array):
     return r.assign("array_r", array_r)
 
 
-def fit_and_predict(train, test, granularity, s, get_prediction, n_inducing=None, eps=0.05):
+def fit_and_predict(train, test, granularity, s_vec, get_prediction, n_inducing=None, eps=0.05):
     C, A, R, A_opt = unpack_data_from_rpyobj(train)
     C_test, A_test, R_test, A_opt_test = unpack_data_from_rpyobj(test)
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
     a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
-    A_pred = get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s, n_inducing=n_inducing)
-    value = get_prediction(np2r(A_pred), test)[0]
-    return A_pred, value
+    A_preds = get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s_vec, n_inducing=n_inducing)
+    # for each column (treatment predicted for particular s) get value
+    values = [get_prediction(np2r(A_pred.reshape(-1,1)), test)[0] for A_pred in A_preds.T]
+    return A_preds, np.array(values)
 
 
 def get_kc_exp_covar(ls_c, c_t, C, sigma_2f):
