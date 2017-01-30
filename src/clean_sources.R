@@ -1,6 +1,7 @@
 
 # source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
 
+library("truncnorm")
 
 rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
   if (length(n) > 1) 
