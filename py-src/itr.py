@@ -1,17 +1,13 @@
-import GPy as gpy
-from GPy.mappings import Linear, Constant, Additive
 import numpy as np
-from matplotlib import pyplot as plt
 import scipy as sp
+from matplotlib import pyplot as plt
 from collections import Iterable
 from itertools import product
 from sklearn.cluster import KMeans
 
 
-
-import GPy.util.multioutput as mo
-
-mo.IGPy.kern.BiasCM()
+import GPy as gpy
+from GPy.mappings import Linear, Constant, Additive
 
 
 def generate_tuples(d, flables, slabels, sc):
@@ -60,7 +56,7 @@ def get_k_means_init(m, X, Y, n_reps):
     kmeans.cluster_centers_
 
 
-
+from GPy.util import normalizer
 
 def fit_GP(X, Y, fit_params):
     # :fit_params: dict with keys
@@ -68,22 +64,25 @@ def fit_GP(X, Y, fit_params):
     #   n_restarts:1
     #   n_inducing:None
     #   inducing_kmeans_init:True – init inducing points with kmeans
+    #   normalize:False – use mean-std normalizer for outputs
     #   verbose:True
     #   robust:True
     mean_fn = fit_params.get("mean_fn", True)
     n_restarts = fit_params.get("n_restarts", 1)
     n_inducing = fit_params.get("n_inducing")
     inducing_kmeans_init = fit_params.get("inducing_kmeans_init", True)
+    normalize = fit_params.get("normalize", False)
     verbose = fit_params.get("verbose", True)
     robust = fit_params.get("robust", True)
     kern = gpy.kern.RBF(X.shape[1],  ARD=True)  # n_of_dimensions
     mf = Additive(Linear(X.shape[1],Y.shape[1]), Constant(X.shape[1],Y.shape[1]))
+    mf = mf if mean_fn else None
     if n_inducing is not None:  # doing sparse regression
         Z = get_initial_inducing(n_inducing, X, kmeans=inducing_kmeans_init)
         # TODO: mean_function is not supported in default constructor
         m = gpy.models.SparseGPRegression(X, Y, kernel=kern, Z=Z)   # , mean_function=mf)
     else:
-        m = gpy.models.GPRegression(X, Y, kern, mean_function=mf if mean_fn else None)
+        m = gpy.models.GPRegression(X, Y, kern, mean_function=mf, normalizer=normalize)
     if fit_params.get("initialize"):
         assert n_restarts == 1, "More then 1 opt restart is useless when init deterministically!"
         init_params = get_init_params(m, X, Y, fit_params.get("best_perc", 40))
