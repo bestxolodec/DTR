@@ -109,7 +109,7 @@ def predict_with_GP_lower_surface(m, X_test, s_vec, granularity, space):
         # lower_surf.shape = (s_factors, num of test objects, num of grid points)
         lower_surf = ms - np.asarray(s_vec).reshape(-1, 1, 1) * np.sqrt(vs)
         prediction.append(space[lower_surf.argmax(axis=-1).T])
-    return np.vstack(prediction) # shape = (num of test objects, s_factors)
+    return np.vstack(prediction)  # shape = (num of test objects, s_factors)
 
 
 def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
@@ -118,10 +118,9 @@ def get_mesh_of_cov_treat(C, a_min, a_max, granularity):
     return np.hstack([np.repeat(C, granularity, axis=0), np.tile(space, n_test).reshape(-1,1)]), space
 
 
-def get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s_vec, fit_params):
+def get_brute_treatment_prediction(granularity, a_min, a_max, C_test, s_vec, m):
     X_mesh, space = get_mesh_of_cov_treat(C_test, a_min, a_max, granularity)
-    m = fit_GP(X, R, fit_params=fit_params)
-    return predict_with_GP_lower_surface(m, X_mesh, s_vec, granularity, space), m
+    return predict_with_GP_lower_surface(m, X_mesh, s_vec, granularity, space)
 
 
 def np2r(array):
@@ -134,13 +133,35 @@ def np2r(array):
 
 
 def normalize(C, A, R, A_opt, C_test, A_test, R_test, A_opt_test):
-     C_test = (C_test - C.min(axis=0)) / (C.max(axis=0) - C.min(axis=0))
-     C = (C - C.min(axis=0)) / (C.max(axis=0)  - C.min(axis=0))
-     A_test = (A_test - A.min(axis=0)) / (A.max(axis=0) - A.min(axis=0))
-     A = (A - A.min(axis=0)) / (A.max(axis=0)  - A.min(axis=0))
-     R_test = (R_test - R.min(axis=0)) / (R.max(axis=0) - R.min(axis=0))
-     R = (R - R.min(axis=0)) / (R.max(axis=0)  - R.min(axis=0))
-     return C, A, R, A_opt, C_test, A_test, R_test, A_opt_test
+    C_test = (C_test - C.min(axis=0)) / (C.max(axis=0) - C.min(axis=0))
+    C = (C - C.min(axis=0)) / (C.max(axis=0)  - C.min(axis=0))
+    A_test = (A_test - A.min(axis=0)) / (A.max(axis=0) - A.min(axis=0))
+    A = (A - A.min(axis=0)) / (A.max(axis=0)  - A.min(axis=0))
+    R_test = (R_test - R.min(axis=0)) / (R.max(axis=0) - R.min(axis=0))
+    R = (R - R.min(axis=0)) / (R.max(axis=0)  - R.min(axis=0))
+    return C, A, R, A_opt, C_test, A_test, R_test, A_opt_test
+
+
+def get_gopt_treatment_prediction(C_test, s_vec, m, A):
+    import go_amp
+    predictions = []
+    x0 = A.mean(axis=0  # FIXME: decide on initial value
+    for c in C_test:  # iterrows
+        f = lambda a: m.predict(c)[0]  # mean
+        predictions.append(go_amp.AMPGO(f, x0)[0])
+    return np.vstack(predictions)
+
+
+    ms, vs = [o.reshape(-1, granularity) for o in m.predict(batch)]
+    # approximate distance between local minima
+    stepsize = (np.diff(sorted(A))).mean()
+    # R.max() - R.min() = possible value for temperature
+    # min_kw = {"method": "TNC" , "jac": f_obj_grad_vec, "options":{'gtol': 1e-1}}
+    res = sc.optimize.basinhopping(f_obj, x_0, niter=1000,   T=20,
+                                   stepsize=stepsize,
+                                   minimizer_kwargs=min_kw)
+
+
 
 def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params={}, eps=0.05):
     """
@@ -155,19 +176,45 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
     """
     C, A, R, A_opt = unpack_data_from_rpyobj(train)
     C_test, A_test, R_test, A_opt_test = unpack_data_from_rpyobj(test)
-    # TODO: remove the following line
-    C, A, R, A_opt , C_test, A_test, R_test, A_opt_test = normalize(C, A, R, A_opt , C_test, A_test, R_test, A_opt_test)
+
+    # FIXME: hack for testing
+    # C, A, R, A_opt , C_test, A_test, R_test, A_opt_test = normalize(C, A, R, A_opt , C_test, A_test, R_test, A_opt_test)
+    cmin, cmax = C.min(axis=0), C.max(axis=0)
+    amin, amax = A.min(axis=0), A.max(axis=0)
+    rmin, rmax = R.min(axis=0), R.max(axis=0)
+
+    C_test = (C_test - cmin) / (cmax - cmin)
+    C = (C - cmin) / (cmax - cmin)
+    A_test = (A_test - amin) / (amax - amin)
+    A = (A - amin) / (amax - amin)
+    R_test = (R_test - rmin) / (rmax - rmin)
+    R = (R - rmin) / (rmax - rmin)
+
+
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
-    a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
-    A_preds, m = get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s_vec, fit_params)
+    m = fit_GP(X, R, fit_params=fit_params)
+
+    if A.shape[1] == 1 :  # one dimensional regression with bruteforce
+        a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
+        A_preds = get_brute_treatment_prediction(granularity, a_min, a_max, C_test, s_vec, m)
+    else:
+        A_preds = get_gopt_treatment_prediction(C_test, s_vec, m, A)
+
+
+
+
+    # FIXME: hack for testing – inverse transform
+    A_preds = A_preds * (amax - amin) + amin
+    C_test = C_test * (cmax - cmin) + cmin
+
+
     evaluator = lambda pred, test: get_prediction(np2r(pred.reshape(-1,1)), test)[0]
     if isinstance(test, dict):
         evaluator = lambda pred, test: get_prediction(pred, test)
     # for each column (treatment predicted for particular s) get value
+
     values = [evaluator(A_pred, test) for A_pred in A_preds.T]
     return A_preds, np.array(values), m
-
-
 
 
 
