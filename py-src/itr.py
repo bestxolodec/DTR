@@ -32,11 +32,20 @@ def unpack_from_rpyobj(obj):
     return [np.array(obj.rx2(name)) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
 
 
-def unpack_data_from_rpyobj(obj):
+def min_max_normalize(x):
+    assert x.ndim == 2
+    return (x - x.min(axis=2)) / (x.max() - x.min())
+
+
+def unpack_data_from_rpyobj(obj, normalize_C=False, normalize_A=False, normalize_R=False):
+    extractor = lambda name: np.array(obj.rx2(name))
+    # TODO: check if this is proper way to check
+    if isinstance(obj, dict):
+        extractor = lambda name: obj[name]
     if 'covariates' in obj.names:
-        unpacked_seq = [np.array(obj.rx2(name)) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
+        unpacked_seq = [extractor(name) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
     else:
-        unpacked_seq = [np.array(obj.rx2(name)) for name in ['X', 'A', 'R', 'D_opt']]
+        unpacked_seq = [extractor(name) for name in ['X', 'A', 'R', 'D_opt']]
     return [ar.reshape(-1, 1) if ar.ndim == 1 else ar for ar in unpacked_seq]
 
 
@@ -48,15 +57,6 @@ def get_init_params(m, X, Y, best_perc=40):
     m_small.optimize()
     return m_small.param_array.copy()
 
-
-def get_k_means_init(m, X, Y, n_reps):
-    # TODO: decide whether this function is needed
-    kmeans = KMeans(n_clusters=2, random_state=0).fit(X)
-    kmeans.labels_
-    kmeans.cluster_centers_
-
-
-from GPy.util import normalizer
 
 def fit_GP(X, Y, fit_params):
     # :fit_params: dict with keys
@@ -99,7 +99,6 @@ def fit_GP(X, Y, fit_params):
     return m
 
 
-
 def predict_with_GP_lower_surface(m, X_test, s_vec, granularity, space):
     assert isinstance(s_vec, Iterable)  # s_vec should be at least python list or np.array
     prediction = []
@@ -134,6 +133,15 @@ def np2r(array):
     return r.assign("array_r", array_r)
 
 
+def normalize(C, A, R, A_opt, C_test, A_test, R_test, A_opt_test):
+     C_test = (C_test - C.min(axis=0)) / (C.max(axis=0) - C.min(axis=0))
+     C = (C - C.min(axis=0)) / (C.max(axis=0)  - C.min(axis=0))
+     A_test = (A_test - A.min(axis=0)) / (A.max(axis=0) - A.min(axis=0))
+     A = (A - A.min(axis=0)) / (A.max(axis=0)  - A.min(axis=0))
+     R_test = (R_test - R.min(axis=0)) / (R.max(axis=0) - R.min(axis=0))
+     R = (R - R.min(axis=0)) / (R.max(axis=0)  - R.min(axis=0))
+     return C, A, R, A_opt, C_test, A_test, R_test, A_opt_test
+
 def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params={}, eps=0.05):
     """
     :param train:
@@ -147,12 +155,22 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
     """
     C, A, R, A_opt = unpack_data_from_rpyobj(train)
     C_test, A_test, R_test, A_opt_test = unpack_data_from_rpyobj(test)
+    # TODO: remove the following line
+    C, A, R, A_opt , C_test, A_test, R_test, A_opt_test = normalize(C, A, R, A_opt , C_test, A_test, R_test, A_opt_test)
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
     a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
     A_preds, m = get_brute_treatment_prediction(granularity, a_min, a_max, X, R, C_test, s_vec, fit_params)
+    evaluator = lambda pred, test: get_prediction(np2r(pred.reshape(-1,1)), test)[0]
+    if isinstance(test, dict):
+        evaluator = lambda pred, test: get_prediction(pred, test)
     # for each column (treatment predicted for particular s) get value
-    values = [get_prediction(np2r(A_pred.reshape(-1,1)), test)[0] for A_pred in A_preds.T]
+    values = [evaluator(A_pred, test) for A_pred in A_preds.T]
     return A_preds, np.array(values), m
+
+
+
+
+
 
 
 def get_kc_exp_covar(ls_c, c_t, C, sigma_2f):
