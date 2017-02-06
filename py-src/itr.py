@@ -145,7 +145,7 @@ def normalize(C, A, R, A_opt, C_test, A_test, R_test, A_opt_test):
 def get_gopt_treatment_prediction(C_test, s_vec, m, A):
     import go_amp
     predictions = []
-    x0 = A.mean(axis=0  # FIXME: decide on initial value
+    x0 = A.mean(axis=0)  # FIXME: decide on initial value
     for c in C_test:  # iterrows
         f = lambda a: m.predict(c)[0]  # mean
         predictions.append(go_amp.AMPGO(f, x0)[0])
