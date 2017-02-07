@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 from collections import Iterable
 from itertools import product
 from sklearn.cluster import KMeans
-
+from sklearn.preprocessing import MinMaxScaler
 
 import GPy as gpy
 from GPy.mappings import Linear, Constant, Additive
@@ -17,7 +17,6 @@ def generate_tuples(d, flables, slabels, sc):
 
 def get_initial_inducing(n_of_inducing, X, kmeans):
     if kmeans:
-        from sklearn.cluster import KMeans
         return KMeans(n_clusters=n_of_inducing, random_state=0, copy_x=False,
                       max_iter=100, n_init=2).fit(X).cluster_centers_
     else:
@@ -38,14 +37,12 @@ def min_max_normalize(x):
 
 
 def unpack_data_from_rpyobj(obj, normalize_C=False, normalize_A=False, normalize_R=False):
-    extractor = lambda name: np.array(obj.rx2(name))
-    # TODO: check if this is proper way to check
     if isinstance(obj, dict):
-        extractor = lambda name: obj[name]
-    if 'covariates' in obj.names:
-        unpacked_seq = [extractor(name) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
+        unpacked_seq = [obj[name] for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
+    elif 'covariates' in obj.names:
+        unpacked_seq = [np.array(obj.rx2(name)) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
     else:
-        unpacked_seq = [extractor(name) for name in ['X', 'A', 'R', 'D_opt']]
+        unpacked_seq = [np.array(obj.rx2(name)) for name in ['X', 'A', 'R', 'D_opt']]
     return [ar.reshape(-1, 1) if ar.ndim == 1 else ar for ar in unpacked_seq]
 
 
@@ -147,7 +144,7 @@ def get_gopt_treatment_prediction(C_test, s_vec, m, A):
     predictions = []
     x0 = A.mean(axis=0)  # FIXME: decide on initial value
     for c in C_test:  # iterrows
-        f = lambda a: m.predict(c)[0]  # mean
+        f = lambda a: m.predict(np.hstack([c, a]).reshape(1,-1))[0]  # mean
         predictions.append(go_amp.AMPGO(f, x0)[0])
     return np.vstack(predictions)
 
@@ -177,22 +174,14 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
     C, A, R, A_opt = unpack_data_from_rpyobj(train)
     C_test, A_test, R_test, A_opt_test = unpack_data_from_rpyobj(test)
 
-    # FIXME: hack for testing
-    # C, A, R, A_opt , C_test, A_test, R_test, A_opt_test = normalize(C, A, R, A_opt , C_test, A_test, R_test, A_opt_test)
-    cmin, cmax = C.min(axis=0), C.max(axis=0)
-    amin, amax = A.min(axis=0), A.max(axis=0)
-    rmin, rmax = R.min(axis=0), R.max(axis=0)
-
-    C_test = (C_test - cmin) / (cmax - cmin)
-    C = (C - cmin) / (cmax - cmin)
-    A_test = (A_test - amin) / (amax - amin)
-    A = (A - amin) / (amax - amin)
-    R_test = (R_test - rmin) / (rmax - rmin)
-    R = (R - rmin) / (rmax - rmin)
-
+    C_scaler, A_scaler, R_scaler = [MinMaxScaler().fit(d) for d in [C, A, R]]
+    C, C_test = [C_scaler.transform(d) for d in [C, C_test]]
+    A, A_test = [A_scaler.transform(d) for d in [A, A_test]]
+    R, R_test = [R_scaler.transform(d) for d in [R, R_test]]
 
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
     m = fit_GP(X, R, fit_params=fit_params)
+    # return C_test, s_vec, m, A
 
     if A.shape[1] == 1 :  # one dimensional regression with bruteforce
         a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
@@ -201,19 +190,13 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
         A_preds = get_gopt_treatment_prediction(C_test, s_vec, m, A)
 
 
+    A_preds = A_scaler.inverse_transform(A_preds)
+    if A.shape[1] == 1:  # prediction values for multiple s_factors
+        # for each column (treatment predicted for particular s) get value
+        values = [get_prediction(np2r(pred.reshape(-1,1)), test)[0] for A_pred in A_preds.T]
+    else:  # multidimensional treatment
+        values = get_prediction(A_preds, test)
 
-
-    # FIXME: hack for testing – inverse transform
-    A_preds = A_preds * (amax - amin) + amin
-    C_test = C_test * (cmax - cmin) + cmin
-
-
-    evaluator = lambda pred, test: get_prediction(np2r(pred.reshape(-1,1)), test)[0]
-    if isinstance(test, dict):
-        evaluator = lambda pred, test: get_prediction(pred, test)
-    # for each column (treatment predicted for particular s) get value
-
-    values = [evaluator(A_pred, test) for A_pred in A_preds.T]
     return A_preds, np.array(values), m
 
 
