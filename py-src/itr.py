@@ -5,9 +5,17 @@ from collections import Iterable
 from itertools import product
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import MinMaxScaler
+from multiprocessing import Pool
 
 import GPy as gpy
 from GPy.mappings import Linear, Constant, Additive
+
+
+
+
+
+
+
 
 
 def generate_tuples(d, flables, slabels, sc):
@@ -36,11 +44,12 @@ def min_max_normalize(x):
     return (x - x.min(axis=2)) / (x.max() - x.min())
 
 
-def unpack_data_from_rpyobj(obj, normalize_C=False, normalize_A=False, normalize_R=False):
+def unpack_data_from_rpyobj(obj):
+    keys = ['covariates', 'treatment', 'reward', "optimal.treatment"]
     if isinstance(obj, dict):
-        unpacked_seq = [obj[name] for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
+        unpacked_seq = [obj[name] for name in keys]
     elif 'covariates' in obj.names:
-        unpacked_seq = [np.array(obj.rx2(name)) for name in ['covariates', 'treatment', 'reward', "optimal.treatment"]]
+        unpacked_seq = [np.array(obj.rx2(name)) for name in keys]
     else:
         unpacked_seq = [np.array(obj.rx2(name)) for name in ['X', 'A', 'R', 'D_opt']]
     return [ar.reshape(-1, 1) if ar.ndim == 1 else ar for ar in unpacked_seq]
@@ -129,34 +138,48 @@ def np2r(array):
     return r.assign("array_r", array_r)
 
 
-def normalize(C, A, R, A_opt, C_test, A_test, R_test, A_opt_test):
-    C_test = (C_test - C.min(axis=0)) / (C.max(axis=0) - C.min(axis=0))
-    C = (C - C.min(axis=0)) / (C.max(axis=0)  - C.min(axis=0))
-    A_test = (A_test - A.min(axis=0)) / (A.max(axis=0) - A.min(axis=0))
-    A = (A - A.min(axis=0)) / (A.max(axis=0)  - A.min(axis=0))
-    R_test = (R_test - R.min(axis=0)) / (R.max(axis=0) - R.min(axis=0))
-    R = (R - R.min(axis=0)) / (R.max(axis=0)  - R.min(axis=0))
-    return C, A, R, A_opt, C_test, A_test, R_test, A_opt_test
+def opt_worker(args):  # function to run optimization in parallel
+    import go_amp
+    c, m, x0 = args
+    def f(a): return m.predict(np.hstack([c, a]).reshape(1,-1))[0]  # mean
+    return go_amp.AMPGO(f, x0)[0]
 
 
 def get_gopt_treatment_prediction(C_test, s_vec, m, A):
-    import go_amp
-    predictions = []
     x0 = A.mean(axis=0)  # FIXME: decide on initial value
-    for c in C_test:  # iterrows
-        f = lambda a: m.predict(np.hstack([c, a]).reshape(1,-1))[0]  # mean
-        predictions.append(go_amp.AMPGO(f, x0)[0])
-    return np.vstack(predictions)
+    arg_list = [(C_test[i], m, x0) for i in range(C_test.shape[0])]
+    return np.vstack(Pool(4).map(opt_worker, arg_list))
 
 
-    ms, vs = [o.reshape(-1, granularity) for o in m.predict(batch)]
-    # approximate distance between local minima
-    stepsize = (np.diff(sorted(A))).mean()
-    # R.max() - R.min() = possible value for temperature
-    # min_kw = {"method": "TNC" , "jac": f_obj_grad_vec, "options":{'gtol': 1e-1}}
-    res = sc.optimize.basinhopping(f_obj, x_0, niter=1000,   T=20,
-                                   stepsize=stepsize,
-                                   minimizer_kwargs=min_kw)
+    # predictions = []
+    # for c in C_test:  # iterrows
+    #     f = lambda a: m.predict(np.hstack([c, a]).reshape(1,-1))[0]  # mean
+    #     predictions.append(go_amp.AMPGO(f, x0)[0])
+    # return np.vstack(predictions)
+
+    # def worker(d):
+    #     v,t  = d
+    #     print("started ", v, " to sleep ", t)
+    #     sleep(t)
+    #     print("exited ", v)
+    #     return v
+    #
+    # N = 10
+    # data = list(zip(np.arange(N), np.hstack([30, np.random.randint(10, size=N-1)] )))
+    #
+    # from multiprocessing import  Pool
+    # p = Pool(8)
+    # p.map(worker, data)
+
+    # # TODO: global optimization with basinhopping
+    # ms, vs = [o.reshape(-1, granularity) for o in m.predict(batch)]
+    # # approximate distance between local minima
+    # stepsize = (np.diff(sorted(A))).mean()
+    # # R.max() - R.min() = possible value for temperature
+    # # min_kw = {"method": "TNC" , "jac": f_obj_grad_vec, "options":{'gtol': 1e-1}}
+    # res = sc.optimize.basinhopping(f_obj, x_0, niter=1000,   T=20,
+    #                                stepsize=stepsize,
+    #                                minimizer_kwargs=min_kw)
 
 
 
@@ -178,22 +201,22 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
     C, C_test = [C_scaler.transform(d) for d in [C, C_test]]
     A, A_test = [A_scaler.transform(d) for d in [A, A_test]]
     R, R_test = [R_scaler.transform(d) for d in [R, R_test]]
+    # return C, A, R
 
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
     m = fit_GP(X, R, fit_params=fit_params)
-    # return C_test, s_vec, m, A
 
     if A.shape[1] == 1 :  # one dimensional regression with bruteforce
         a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
         A_preds = get_brute_treatment_prediction(granularity, a_min, a_max, C_test, s_vec, m)
-    else:
+    else:  # multidimensional with global optimization technique
         A_preds = get_gopt_treatment_prediction(C_test, s_vec, m, A)
 
 
     A_preds = A_scaler.inverse_transform(A_preds)
     if A.shape[1] == 1:  # prediction values for multiple s_factors
         # for each column (treatment predicted for particular s) get value
-        values = [get_prediction(np2r(pred.reshape(-1,1)), test)[0] for A_pred in A_preds.T]
+        values = [get_prediction(np2r(pred.reshape(-1, 1)), test)[0] for pred in A_preds.T]
     else:  # multidimensional treatment
         values = get_prediction(A_preds, test)
 
