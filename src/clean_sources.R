@@ -1,5 +1,5 @@
 
-# source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
+source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
 
 library("truncnorm")
 

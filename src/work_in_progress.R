@@ -1315,3 +1315,25 @@ curve(dbeta(x, 1, .1))
 
 
 
+n <- 1000
+m <- 1
+o <-  rgamma(n,1, 1)
+hist(o, breaks=100)
+sapply(seq(100), function(j) {
+  oo <- sapply(seq(10000), function(i)  sum((o-m) * rbinom(n, size=1, prob=.5)))
+  
+  
+  
+})
+hist(oo, breaks=100)
+abline(v=sum(o-1), col=2, lw=3)
+
+sum(o - 1)
+
+hist(o - 1)
+
+
+
+
+
+mean(o)

@@ -12,12 +12,6 @@ from GPy.mappings import Linear, Constant, Additive
 
 
 
-
-
-
-
-
-
 def generate_tuples(d, flables, slabels, sc):
     for i,j,k in product(*[range(o) for o in d.shape]):
         yield (sc, flables[i], slabels[j],  d[i,j,k])
@@ -182,6 +176,78 @@ def get_gopt_treatment_prediction(C_test, s_vec, m, A):
     #                                minimizer_kwargs=min_kw)
 
 
+class GP_wrapper(object):
+    """This wrapper is needed to incapsulate scaling"""
+    def __init__(self):
+
+
+
+
+    X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
+    m = fit_GP(X, R, fit_params=fit_params)
+
+
+    def _fit_scaler_and_transform(self, X, Y):
+        self.x_scaler,  self.y_scaler = [MinMaxScaler().fit(d) for d in [X, Y]]
+        X_scaled = self.x_scaler.transform(X)
+        Y_scaled = self.y_scaler.transform(Y)
+        return X_scaled, Y_scaled
+
+
+    @staticmethod
+    def _fit(X, Y, fit_params):
+        # :fit_params: dict with keys
+        #   mean_fn:True
+        #   n_restarts:1
+        #   n_inducing:None
+        #   inducing_kmeans_init:True – init inducing points with kmeans
+        #   normalize:False – use mean-std normalizer for outputs
+        #   verbose:True
+        #   robust:True
+        mean_fn = fit_params.get("mean_fn", True)
+        n_restarts = fit_params.get("n_restarts", 1)
+        n_inducing = fit_params.get("n_inducing")
+        inducing_kmeans_init = fit_params.get("inducing_kmeans_init", True)
+        normalize = fit_params.get("normalize", False)
+        verbose = fit_params.get("verbose", True)
+        robust = fit_params.get("robust", True)
+        kern = gpy.kern.RBF(X.shape[1], ARD=True)  # n_of_dimensions
+        mf = Additive(Linear(X.shape[1], Y.shape[1]), Constant(X.shape[1], Y.shape[1]))
+        mf = mf if mean_fn else None
+        if n_inducing is not None:  # doing sparse regression
+            Z = get_initial_inducing(n_inducing, X, kmeans=inducing_kmeans_init)
+            # TODO: mean_function is not supported in default constructor
+            m = gpy.models.SparseGPRegression(X, Y, kernel=kern, Z=Z)  # , mean_function=mf)
+        else:
+            m = gpy.models.GPRegression(X, Y, kern, mean_function=mf, normalizer=normalize)
+        if fit_params.get("initialize"):
+            assert n_restarts == 1, "More then 1 opt restart is useless when init deterministically!"
+            init_params = get_init_params(m, X, Y, fit_params.get("best_perc", 40))
+            m.optimize(start=init_params)
+            # best_params, best_objective = np.zeros_like(m.param_array), np.inf
+            # for _ in range(n_restarts):
+            #     cur_objective = m.objective_function()
+            #     if cur_objective < best_objective:
+            #         best_params, best_objective = m.param_array.copy(), cur_objective
+            #     m.param_array[:] = best_params  # in memory update as in sources
+        else:
+            m.optimize_restarts(num_restarts=n_restarts, robust=robust,
+                                verbose=verbose, num_processes=min(4, n_restarts))
+        return m
+
+
+    def fit(self, X, Y, fit_params={}):
+        """ Wrapper function to support scaling """
+        X, Y = self._fit_scaler_and_transform(X, Y)
+        self.model = self._fit(X, Y, fit_params)
+        return self.model
+
+    def predict(self, X_new):
+        X_new = self.x_scaler.transform(X_new)
+        return self.y_scaler.inverse_transform(self.model.predict(X_new))
+
+
+
 
 def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params={}, eps=0.05):
     """
@@ -206,23 +272,23 @@ def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params=
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
     m = fit_GP(X, R, fit_params=fit_params)
 
+
+
+
     if A.shape[1] == 1 :  # one dimensional regression with bruteforce
         a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
         A_preds = get_brute_treatment_prediction(granularity, a_min, a_max, C_test, s_vec, m)
     else:  # multidimensional with global optimization technique
         A_preds = get_gopt_treatment_prediction(C_test, s_vec, m, A)
 
-
     A_preds = A_scaler.inverse_transform(A_preds)
     if A.shape[1] == 1:  # prediction values for multiple s_factors
         # for each column (treatment predicted for particular s) get value
         values = [get_prediction(np2r(pred.reshape(-1, 1)), test)[0] for pred in A_preds.T]
-    else:  # multidimensional treatment
+    else:  # single multidimensional treatment
         values = get_prediction(A_preds, test)
 
     return A_preds, np.array(values), m
-
-
 
 
 
