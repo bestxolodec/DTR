@@ -14,7 +14,7 @@ import rpy2.robjects as ro
 from itr import fit_and_predict
 ro.r.source("/home/nbuser/DTR/src/clean_sources.R")
 
-LOG_LEVEL = logging.DEBUG
+LOG_LEVEL = logging.WARNING
 LOG_FILE = "/tmp/experiment.log"
 
 logger = logging.getLogger()
@@ -71,23 +71,23 @@ class Experiment(object):
                 # returns A, V, model, save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
                                                 self.pred_value_func, fit_params)[1]
-            logging.info("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
+            logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
 
     def write_to_file(self):
         save_fname = "{}_{}_rep".format(self.scenario, self.n_repeats)
         save_path = os.path.join(self.save_prefix, save_fname)
-        logger.info("Writing raw results to {}  .......".format(save_path))
+        logger.warning("Writing raw results to {}  .......".format(save_path))
         np.save(save_path, self.results)
-        logger.info("Success")
+        logger.warning("Success")
         df = pd.DataFrame.from_records(generate_tuples(self.results, self.n_train_list,
                                                        100 * self.s_factors_percs, self.scenario))
         df.columns = ["scenario", "sample_size", "s_factor", "value_f"]
         csv_save_path = save_path + ".csv"
-        logger.info("Writing csv results to {}  .......".format(csv_save_path))
+        logger.warning("Writing csv results to {}  .......".format(csv_save_path))
         df.to_csv(csv_save_path, index=False)
-        logger.info("Success")
+        logger.warning("Success")
 
 
 if __name__ == "__main__":
@@ -105,6 +105,6 @@ if __name__ == "__main__":
                         help="default path to save simulation results")
     parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
                         help="which percentiles to consider for variance penalty")
-    logger.debug(pformat(vars(parser.parse_args())))
+    logger.warning(pformat(vars(parser.parse_args())))
     experiment = Experiment(vars(parser.parse_args()))
     experiment.run().write_to_file()
