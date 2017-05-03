@@ -36,12 +36,12 @@ class Experiment(object):
         self.n_test = exp_params["n_test"]
         assert len(self.n_train_list) > 0
         self.scenario = exp_params["scenario"]
-        if "chen1" in scenario.lower():
+        if "chen1" in self.scenario.lower():
             self.get_data = ro.globalenv['Scenario1Enriched']
             self.n_cov = 30
-        elif "chen2" in scenario.lower():
+        elif "chen2" in self.scenario.lower():
             self.get_data = ro.globalenv['Scenario2Enriched']
-        elif "chen4" in scenario.lower():
+        elif "chen4" in self.scenario.lower():
             self.get_data = ro.globalenv['Scenario4Enriched']
         else:
             raise "Uknown scenario: " + str(self.scenario)
