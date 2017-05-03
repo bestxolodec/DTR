@@ -29,7 +29,7 @@ def get_params_for_scenario(scenario):
     n_cov, n_train_samples, n_test = 10, [50, 100, 200, 400, 800], 1000  # data gen
     s_factors_percs = np.arange(.5, 1, .01)
     s_factors = sp.stats.norm.ppf(s_factors_percs)  # 50 factors evenly splitted
-    n_repeats = 50
+    n_repeats = 5
     granularity = 50
     if "chen1" in scenario.lower():
         get_data = ro.globalenv['Scenario1Enriched']
@@ -53,8 +53,8 @@ def run_simulation(scenario, save_prefix="/home/nbuser/DTR/"):
         for k in range(n_repeats):
             ko_train = get_data(n_train, n_cov, 777+k)
             ko_test = get_data(n_test, n_cov, 777+k)
-            data[i, :, k] = fit_and_predict(ko_train, ko_test, granularity,
-                                            s_factors, PRED_VALUE_FUNC)[1]
+            fit_params = {"verbose": False}
+            data[i, :, k] = fit_and_predict(ko_train, ko_test, granularity, s_factors, PRED_VALUE_FUNC, fit_params)[1]
         print("elapsed {:.2f} min".format((timer() - start) / 60))
     save_fname = "{}_{}_rep".format(scenario, n_repeats)
     save_path = os.path.join(save_prefix, save_fname)
