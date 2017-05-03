@@ -19,7 +19,7 @@ LOG_FILE = "/tmp/experiment.log"
 
 logger = logging.getLogger()
 logger.setLevel(LOG_LEVEL)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 fh = logging.FileHandler(LOG_FILE)
 fh.setLevel(LOG_LEVEL)
 fh.setFormatter(formatter)
@@ -48,16 +48,16 @@ class Experiment(object):
         assert len(self.n_train_list) > 0
         self.scenario = exp_params["scenario"]
         if "chen1" in self.scenario.lower():
-            self.get_data = ro.globalenv['Scenario1Enriched']
+            self.get_data = ro.globalenv["Scenario1Enriched"]
             self.n_cov = 30
         elif "chen2" in self.scenario.lower():
-            self.get_data = ro.globalenv['Scenario2Enriched']
+            self.get_data = ro.globalenv["Scenario2Enriched"]
         elif "chen4" in self.scenario.lower():
-            self.get_data = ro.globalenv['Scenario4Enriched']
+            self.get_data = ro.globalenv["Scenario4Enriched"]
         else:
             raise "Uknown scenario: " + str(self.scenario)
         self.save_prefix = exp_params["save_prefix"]
-        self.pred_value_func = ro.globalenv['PredValueGeneral']
+        self.pred_value_func = ro.globalenv["PredValueGeneral"]
         self.results = None
 
     def run(self):
@@ -92,16 +92,19 @@ class Experiment(object):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Experimets with GP',
+    parser = argparse.ArgumentParser(description="Experimets with GP",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-s', '--scenario', action='store', default="chen1",
-                        dest='scenario', help='Scenario to be run')
-    parser.add_argument('--n_train_list', type=int, nargs='+', default=[50, 100, 200, 400, 800])
-    parser.add_argument('--n_repeats', type=int, default=50)
-    parser.add_argument('--granularity', type=int, default=50)
-    parser.add_argument('--n_test', type=int, default=1000)
-    parser.add_argument('--save_prefix', type=str, default="/home/nbuser/DTR/")
-    parser.add_argument('--s_factors_percs', type=float, nargs='+', default=np.arange(.5, 1, .01))
+    parser.add_argument("-s", "--scenario", action="store", default="chen1",
+                        dest="scenario", help="Scenario to be run")
+    parser.add_argument("--n_train_list", type=int, nargs="+", default=[50, 100, 200, 400, 800],
+                        help="list of train sample sizes")
+    parser.add_argument("--n_repeats", type=int, default=50, help="number of repeats of data sampling")
+    parser.add_argument("--granularity", type=int, default=50, help="number of points in a treatment grid")
+    parser.add_argument("--n_test", type=int, default=1000, help="number of samples in test data")
+    parser.add_argument("--save_prefix", type=str, default="/home/nbuser/DTR/",
+                        help="default path to save simulation results")
+    parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
+                        help="which percentiles to consider for variance penalty")
     logger.debug(pformat(vars(parser.parse_args())))
     experiment = Experiment(vars(parser.parse_args()))
     experiment.run().write_to_file()
