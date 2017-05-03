@@ -55,8 +55,8 @@ class Experiment(object):
             print(n_train, end="\t")
             start = timer()
             for k in range(self.n_repeats):
-                ko_train = get_data(n_train, self.n_cov, 777+k)
-                ko_test = get_data(self.n_test, self.n_cov, 777+k)
+                ko_train = self.get_data(n_train, self.n_cov, 777+k)
+                ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
                 fit_params = {"verbose": False}
                 # returns A, V, model, save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
