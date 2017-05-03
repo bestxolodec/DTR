@@ -12,6 +12,9 @@ import rpy2.robjects as ro
 from itr import fit_and_predict
 ro.r.source("/home/nbuser/DTR/src/clean_sources.R")
 
+PRED_VALUE_FUNC = ro.globalenv['PredValueGeneral']
+
+# get_ko_learning_value_and_predicted_dose = ro.globalenv['GetKOLearningValueAndPredictedDose']
 
 # CHECK IF THIS GOES OK
 # chen_1 = ro.globalenv['Scenario1Enriched']
@@ -51,7 +54,7 @@ def run_simulation(scenario, save_prefix="/home/nbuser/DTR/"):
             ko_train = get_data(n_train, n_cov, 777+k)
             ko_test = get_data(n_test, n_cov, 777+k)
             data[i, :, k] = fit_and_predict(ko_train, ko_test, granularity,
-                                            s_factors, pred_value_general)[1]
+                                            s_factors, PRED_VALUE_FUNC)[1]
         print("elapsed {:.2f} min".format((timer() - start) / 60))
     save_fname = "{}_{}_rep".format(scenario, n_repeats)
     save_path = os.path.join(save_prefix, save_fname)
