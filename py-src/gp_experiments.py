@@ -62,7 +62,7 @@ def run_simulation(scenario, save_prefix="/home/nbuser/DTR/"):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Experimets with GP')
-    parser.add_argument('-s', '--scenario', action='store_value',
+    parser.add_argument('-s', '--scenario', action='store',
                         dest='scenario', help='Scenario to be run')
     args = parser.parse_args()
     run_simulation(args.scenario)
