@@ -57,7 +57,7 @@ class Experiment(object):
             for k in range(self.n_repeats):
                 ko_train = self.get_data(n_train, self.n_cov, 777+k)
                 ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
-                fit_params = {"verbose": False}
+                fit_params = {"verbose": False, "n_restarts": 100}
                 # returns A, V, model, save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
                                                 self.pred_value_func, fit_params)[1]
@@ -68,14 +68,14 @@ class Experiment(object):
     def write_to_file(self):
         save_fname = "{}_{}_rep".format(self.scenario, self.n_repeats)
         save_path = os.path.join(self.save_prefix, save_fname)
-        print("Writing raw results to {}.......".format(save_path), end=" ")
+        print("Writing raw results to {}  .......".format(save_path), end=" ")
         np.save(save_path, self.results)
         print("Success")
         df = pd.DataFrame.from_records(generate_tuples(self.results, self.n_train_list,
                                                        100 * self.s_factors_percs, self.scenario))
         df.columns = ["scenario", "sample_size", "s_factor", "value_f"]
         csv_save_path = save_path + ".csv"
-        print("Writing csv results to {}.......".format(csv_save_path), end=" ")
+        print("Writing csv results to {}  .......".format(csv_save_path), end=" ")
         df.to_csv(csv_save_path, index=False)
         print("Success")
 
