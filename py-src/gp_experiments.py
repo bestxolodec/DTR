@@ -85,7 +85,7 @@ class Experiment(object):
                                                        100 * self.s_factors_percs, self.scenario))
         df.columns = ["scenario", "sample_size", "s_factor", "value_f"]
         csv_save_path = save_path + ".csv"
-        logger.info("Writing csv results to {}  .......".format(csv_save_path), end=" ")
+        logger.info("Writing csv results to {}  .......".format(csv_save_path))
         df.to_csv(csv_save_path, index=False)
         logger.info("Success")
 
