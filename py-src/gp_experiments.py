@@ -6,17 +6,28 @@ import scipy as sp
 import numpy as np
 from itertools import product
 from timeit import default_timer as timer
+import logging
+from pprint import pformat
 
 import readline
 import rpy2.robjects as ro
 from itr import fit_and_predict
 ro.r.source("/home/nbuser/DTR/src/clean_sources.R")
 
+LOG_LEVEL = logging.DEBUG
+LOG_FILE = "/tmp/experiment.log"
 
-# get_ko_learning_value_and_predicted_dose = ro.globalenv['GetKOLearningValueAndPredictedDose']
-# CHECK IF THIS GOES OK
-# chen_1 = ro.globalenv['Scenario1Enriched']
-# print(chen_1(100, 10, 0))
+logger = logging.getLogger()
+logger.setLevel(LOG_LEVEL)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+fh = logging.FileHandler(LOG_FILE)
+fh.setLevel(LOG_LEVEL)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+ch = logging.StreamHandler()
+ch.setLevel(LOG_LEVEL)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 
 
 def generate_tuples(d, flables, slabels, sc):
@@ -52,32 +63,31 @@ class Experiment(object):
     def run(self):
         data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
         for i, n_train in enumerate(self.n_train_list):
-            print(n_train, end="\t")
             start = timer()
             for k in range(self.n_repeats):
                 ko_train = self.get_data(n_train, self.n_cov, 777+k)
                 ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
-                fit_params = {"verbose": False, "n_restarts": 2}
+                fit_params = {"verbose": False, "n_restarts": 1}
                 # returns A, V, model, save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
                                                 self.pred_value_func, fit_params)[1]
-            print("elapsed {:.2f} min".format((timer() - start) / 60))
+            logging.info("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
 
     def write_to_file(self):
         save_fname = "{}_{}_rep".format(self.scenario, self.n_repeats)
         save_path = os.path.join(self.save_prefix, save_fname)
-        print("Writing raw results to {}  .......".format(save_path), end=" ")
+        logger.info("Writing raw results to {}  .......".format(save_path))
         np.save(save_path, self.results)
-        print("Success")
+        logger.info("Success")
         df = pd.DataFrame.from_records(generate_tuples(self.results, self.n_train_list,
                                                        100 * self.s_factors_percs, self.scenario))
         df.columns = ["scenario", "sample_size", "s_factor", "value_f"]
         csv_save_path = save_path + ".csv"
-        print("Writing csv results to {}  .......".format(csv_save_path), end=" ")
+        logger.info("Writing csv results to {}  .......".format(csv_save_path), end=" ")
         df.to_csv(csv_save_path, index=False)
-        print("Success")
+        logger.info("Success")
 
 
 if __name__ == "__main__":
@@ -91,6 +101,6 @@ if __name__ == "__main__":
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--save_prefix', type=str, default="/home/nbuser/DTR/")
     parser.add_argument('--s_factors_percs', type=float, nargs='+', default=np.arange(.5, 1, .01))
-    print(vars(parser.parse_args()))
+    logger.debug(pformat(vars(parser.parse_args())))
     experiment = Experiment(vars(parser.parse_args()))
     experiment.run().write_to_file()
