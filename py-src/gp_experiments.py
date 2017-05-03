@@ -27,9 +27,10 @@ def generate_tuples(d, flables, slabels, sc):
 
 def get_params_for_scenario(scenario):
     n_cov, n_train_samples, n_test = 10, [50, 100, 200, 400, 800], 1000  # data gen
+    n_cov, n_train_samples, n_test = 10, [50, 100], 1000  # data gen
     s_factors_percs = np.arange(.5, 1, .01)
     s_factors = sp.stats.norm.ppf(s_factors_percs)  # 50 factors evenly splitted
-    n_repeats = 5
+    n_repeats = 50
     granularity = 50
     if "chen1" in scenario.lower():
         get_data = ro.globalenv['Scenario1Enriched']
