@@ -3,6 +3,7 @@ import os
 import sys
 import pandas as pd
 import scipy as sp
+import numpy as np
 from itertools import product
 from timeit import default_timer as timer
 
