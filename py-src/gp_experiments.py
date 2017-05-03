@@ -92,7 +92,8 @@ class Experiment(object):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Experimets with GP')
+    parser = argparse.ArgumentParser(description='Experimets with GP',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-s', '--scenario', action='store', default="chen1",
                         dest='scenario', help='Scenario to be run')
     parser.add_argument('--n_train_list', type=int, nargs='+', default=[50, 100, 200, 400, 800])
