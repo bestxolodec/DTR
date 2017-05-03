@@ -29,7 +29,7 @@ class GP_wrapper(object):
         ":param X:
         ":param Y:
         ":param fit_params: dict with keys
-           mean_fn:True
+           mean_fn:False
            n_restarts:1
            n_inducing:None
            inducing_kmeans_init:True – init inducing points with k-means
@@ -37,7 +37,7 @@ class GP_wrapper(object):
            verbose:True
            robust:True
         """
-        mean_fn = fit_params.get("mean_fn", True)
+        mean_fn = fit_params.get("mean_fn", False)
         n_restarts = fit_params.get("n_restarts", 1)
         n_inducing = fit_params.get("n_inducing")
         inducing_kmeans_init = fit_params.get("inducing_kmeans_init", True)
