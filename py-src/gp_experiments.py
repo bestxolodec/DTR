@@ -59,6 +59,7 @@ class Experiment(object):
         self.save_prefix = exp_params["save_prefix"]
         self.pred_value_func = ro.globalenv["PredValueGeneral"]
         self.results = None
+        self.fit_params = exp_params["fit_params"]
 
     def run(self):
         data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
@@ -67,10 +68,10 @@ class Experiment(object):
             for k in range(self.n_repeats):
                 ko_train = self.get_data(n_train, self.n_cov, 777+k)
                 ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
-                fit_params = {"verbose": False, "n_restarts": 1, "normalize": True, "standardize_Y": False}
+                # fit_params = {"verbose": False, "n_restarts": 1, "normalize": True, "standardize_Y": False}
                 # returns (A, V, model); we save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
-                                                self.pred_value_func, fit_params)[1]
+                                                self.pred_value_func, self.fit_params)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
