@@ -76,15 +76,23 @@ class Experiment(object):
         self.results = data
         return self
 
+    def make_fname(self):
+        return "{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
+            self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
+            self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
+
+
     def write_to_file(self):
-        save_fname = "{}_{}_rep".format(self.scenario, self.n_repeats)
+        save_fname = "{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
+            self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
+            self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
         save_path = os.path.join(self.save_prefix, save_fname)
-        np_save_path = save_path + ".npy"
-        logger.warning("Writing raw results to {}  .......".format(np_save_path))
-        np.save(np_save_path, self.results)
-        logger.warning("Success")
-        df = pd.DataFrame.from_records(generate_tuples(self.results, self.n_train_list,
-                                                       100 * self.s_factors_percs, self.scenario))
+        # np_save_path = save_path + ".npy"
+        # logger.warning("Writing raw results to {}  .......".format(np_save_path))
+        # np.save(np_save_path, self.results)
+        # logger.warning("Success")
+        data_tuples = generate_tuples(self.results, self.n_train_list, 100 * self.s_factors_percs, self.scenario)
+        df = pd.DataFrame.from_records(data_tuples)
         df.columns = ["scenario", "sample_size", "s_factor", "value_f"]
         csv_save_path = save_path + ".csv"
         logger.warning("Writing csv results to {}  .......".format(csv_save_path))
@@ -123,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
                         help="which percentiles to consider for variance penalty")
     parser.add_argument("--fit_params", type=str, default="",
-                        help="String with 'key:value' ")
+                        help="String with 'key:value'")
     args_in_dict = vars(parser.parse_args())
     args_in_dict["fit_params"] = parse_fit_params_arg(args_in_dict["fit_params"])
     logger.warning(pformat(args_in_dict))
