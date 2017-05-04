@@ -48,7 +48,7 @@ class GP_wrapper(object):
         kern = gpy.kern.RBF(X.shape[1], ARD=True)  # n_of_dimensions
         mf = Additive(Linear(X.shape[1], Y.shape[1]), Constant(X.shape[1], Y.shape[1]))
         mf = mf if mean_fn else None
-        logging.warning("normalize is {}".format(normalize))
+        logging.debug("normalize is {}".format(normalize))
         if n_inducing is not None:  # doing sparse regression
             Z = get_initial_inducing(n_inducing, X, kmeans=inducing_kmeans_init)
             # TODO: mean_function is not supported in default constructor
@@ -84,11 +84,11 @@ class GP_wrapper(object):
 
     def predict(self, X_new):
         if self.fit_params.get("standardize_X", True):
-            logging.warning("X_scaling is on")
+            logging.debug("X_scaling is on")
             X_new = self.x_scaler.transform(X_new)
         means, variances = self.model.predict(X_new)
         if self.fit_params.get("standardize_Y", True):
-            logging.warning("Y_scaling is on")
+            logging.debug("Y_scaling is on")
             means = self.y_scaler.inverse_transform(means)
             variances /= self.y_scaler.data_range ** 2
         return means, variances
