@@ -48,7 +48,7 @@ class GP_wrapper(object):
         kern = gpy.kern.RBF(X.shape[1], ARD=True)  # n_of_dimensions
         mf = Additive(Linear(X.shape[1], Y.shape[1]), Constant(X.shape[1], Y.shape[1]))
         mf = mf if mean_fn else None
-        logging.warning("normalize is {}".normalize)
+        logging.warning("normalize is {}".format(normalize))
         if n_inducing is not None:  # doing sparse regression
             Z = get_initial_inducing(n_inducing, X, kmeans=inducing_kmeans_init)
             # TODO: mean_function is not supported in default constructor
