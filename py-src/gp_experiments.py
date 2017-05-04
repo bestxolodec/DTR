@@ -68,7 +68,7 @@ class Experiment(object):
                 ko_train = self.get_data(n_train, self.n_cov, 777+k)
                 ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
                 fit_params = {"verbose": False, "n_restarts": 1, "normalize": True, "standardize_Y": False}
-                # returns (A, V, model) save only Values
+                # returns (A, V, model); we save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
                                                 self.pred_value_func, fit_params)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
@@ -91,6 +91,20 @@ class Experiment(object):
         return self
 
 
+def parse_fit_params_arg(s):
+    fit_params= {}
+    for kv in s.strip().split(","):
+        k, v = kv.strip().split(":")
+        if "true" in v.lower():
+            v = True
+        elif "false" in v.lower():
+            v = False
+        else:
+            v = int(v)
+        fit_params[k] = v
+    return fit_params
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Experimets with GP",
@@ -106,6 +120,9 @@ if __name__ == "__main__":
                         help="default path to save simulation results")
     parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
                         help="which percentiles to consider for variance penalty")
-    dict_arguments = vars(parser.parse_args())
-    logger.warning(pformat(dict_arguments))
-    experiment = Experiment(dict_arguments).run().write_to_file()
+    parser.add_argument("--fit_params", type=str, default="",
+                        help="String with 'key:value' ")
+    args_in_dict = vars(parser.parse_args())
+    args_in_dict["fit_params"] = parse_fit_params_arg(args_in_dict["fit_params"])
+    logger.warning(pformat(args_in_dict))
+    experiment = Experiment(args_in_dict).run().write_to_file()
