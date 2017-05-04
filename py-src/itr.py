@@ -8,6 +8,7 @@ from itertools import product
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import MinMaxScaler
 from multiprocessing import Pool
+import logging
 
 import GPy as gpy
 from GPy.mappings import Linear, Constant, Additive
@@ -17,11 +18,11 @@ from GPy.mappings import Linear, Constant, Additive
 class GP_wrapper(object):
     """This wrapper is needed to incapsulate scaling"""
 
-    def _fit_scaler_and_transform(self, X, Y):
-        self.x_scaler,  self.y_scaler = [MinMaxScaler().fit(d) for d in [X, Y]]
-        X_scaled = self.x_scaler.transform(X)
-        Y_scaled = self.y_scaler.transform(Y)
-        return X_scaled, Y_scaled
+    def __init__(self, fit_params):
+        self.fit_params = fit_params
+        self.x_scaler = None
+        self.y_scaler = None
+        self.model = None
 
     @staticmethod
     def _fit(X, Y, fit_params):
@@ -47,6 +48,7 @@ class GP_wrapper(object):
         kern = gpy.kern.RBF(X.shape[1], ARD=True)  # n_of_dimensions
         mf = Additive(Linear(X.shape[1], Y.shape[1]), Constant(X.shape[1], Y.shape[1]))
         mf = mf if mean_fn else None
+        logging.warning("normalize is {}".normalize)
         if n_inducing is not None:  # doing sparse regression
             Z = get_initial_inducing(n_inducing, X, kmeans=inducing_kmeans_init)
             # TODO: mean_function is not supported in default constructor
@@ -62,19 +64,34 @@ class GP_wrapper(object):
                                 verbose=verbose, num_processes=min(4, n_restarts))
         return m
 
-    def fit(self, X, Y, fit_params={}):
+    @staticmethod
+    def _get_scaler_and_transformed_data(data):
+        scaler = MinMaxScaler().fit(data)
+        return scaler.transform(data), scaler
+        # self.x_scaler,  self.y_scaler = [MinMaxScaler().fit(d) for d in [X, Y]]
+        # X_scaled = self.x_scaler.transform(X)
+        # Y_scaled = self.y_scaler.transform(Y)
+        # return X_scaled, Y_scaled
+
+    def fit(self, X, Y):
         """ Wrapper function to support scaling """
-        X, Y = self._fit_scaler_and_transform(X, Y)
-        self.model = self._fit(X, Y, fit_params)
+        if self.fit_params.get("standardize_X", True):
+            self.x_scaler, X = self._get_scaler_and_transformed_data(X)
+        if self.fit_params.get("standardize_Y", True):
+            self.y_scaler, Y = self._get_scaler_and_transformed_data(Y)
+        self.model = self._fit(X, Y, self.fit_params)
         return self
 
     def predict(self, X_new):
-        X_new = self.x_scaler.transform(X_new)
-        # FIXME: need to decide what to return from this function
-        means, vars = self.model.predict(X_new)
-        inv_t = self.y_scaler.inverse_transform
-        data_range =  self.y_scaler.data_range
-        return inv_t(means), vars * data_range ** 2
+        if self.fit_params.get("standardize_X", True):
+            logging.warning("X_scaling is on")
+            X_new = self.x_scaler.transform(X_new)
+        means, variances = self.model.predict(X_new)
+        if self.fit_params.get("standardize_Y", True):
+            logging.warning("Y_scaling is on")
+            means = self.y_scaler.inverse_transform(means)
+            variances /= self.y_scaler.data_range ** 2
+        return means, variances
 
 
 def predict_with_GP_lower_surface(m, X_test, s_vec, granularity, space):
@@ -88,7 +105,6 @@ def predict_with_GP_lower_surface(m, X_test, s_vec, granularity, space):
         lower_surf = ms - np.asarray(s_vec).reshape(-1, 1, 1) * np.sqrt(vs)
         prediction.append(space[lower_surf.argmax(axis=-1).T])
     return np.vstack(prediction)  # shape = (num of test objects, s_factors)
-
 
 
 def get_initial_inducing(n_of_inducing, X, kmeans):
@@ -185,19 +201,22 @@ def get_gopt_treatment_prediction(C_test, s_vec, m, A):
 
 def fit_and_predict(train, test, granularity, s_vec, get_prediction, fit_params={}, eps=0.05):
     """
-    :param train:
-    :param test:
-    :param granularity:
-    :param s_vec:
+    :param train: dataset
+    :param test: dataset
+    :param granularity: number of grid points in A grid
+    :param s_vec: list of variance multipliers penalties
     :param get_prediction: function(prediction, test) which returns value for prediction on test
     :param fit_params: dict with keys mean_fn, n_restarts, n_inducing, verbose, robust
-    :param eps:
+    :param eps: offset to expand possible A boundaries with -eps and +eps respectively
     :return:
+    :A_preds: predicted best treatment
+    :values: value function values, evaluated on a test dataset
+    :m: model build (wrapper over GPy model)
     """
     C, A, R, A_opt = unpack_data_from_rpyobj(train)
     C_test, A_test, R_test, A_opt_test = unpack_data_from_rpyobj(test)
     X, X_test = [np.hstack([a, b]) for a, b in zip([C, C_test], [A, A_test])]
-    m = GP_wrapper().fit(X, R, fit_params)
+    m = GP_wrapper(fit_params).fit(X, R)
     if A.shape[1] == 1 :  # one dimensional regression with bruteforce
         a_min, a_max = np.percentile(A, [0, 100]) + [-eps, +eps]
         A_preds = get_brute_treatment_prediction(granularity, a_min, a_max, C_test, s_vec, m)
@@ -244,7 +263,6 @@ def np2r(array):
     nr, nc = array.shape if array.ndim > 1 else (array.size, 1)
     array_r = r.matrix(array, nrow=nr, ncol=nc)
     return r.assign("array_r", array_r)
-
 
 
 
