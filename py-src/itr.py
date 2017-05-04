@@ -67,7 +67,7 @@ class GP_wrapper(object):
     @staticmethod
     def _get_scaler_and_transformed_data(data):
         scaler = MinMaxScaler().fit(data)
-        return scaler.transform(data), scaler
+        return scaler, scaler.transform(data)
         # self.x_scaler,  self.y_scaler = [MinMaxScaler().fit(d) for d in [X, Y]]
         # X_scaled = self.x_scaler.transform(X)
         # Y_scaled = self.y_scaler.transform(Y)
