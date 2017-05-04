@@ -67,8 +67,8 @@ class Experiment(object):
             for k in range(self.n_repeats):
                 ko_train = self.get_data(n_train, self.n_cov, 777+k)
                 ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
-                fit_params = {"verbose": False, "n_restarts": 1}
-                # returns A, V, model, save only Values
+                fit_params = {"verbose": False, "n_restarts": 50}
+                # returns (A, V, model) save only Values
                 data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
                                                 self.pred_value_func, fit_params)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
@@ -88,6 +88,7 @@ class Experiment(object):
         logger.warning("Writing csv results to {}  .......".format(csv_save_path))
         df.to_csv(csv_save_path, index=False)
         logger.warning("Success")
+        return self
 
 
 if __name__ == "__main__":
@@ -105,6 +106,6 @@ if __name__ == "__main__":
                         help="default path to save simulation results")
     parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
                         help="which percentiles to consider for variance penalty")
-    logger.warning(pformat(vars(parser.parse_args())))
-    experiment = Experiment(vars(parser.parse_args()))
-    experiment.run().write_to_file()
+    dict_arguments = vars(parser.parse_args())
+    logger.warning(pformat(dict_arguments))
+    experiment = Experiment(dict_arguments).run().write_to_file()
