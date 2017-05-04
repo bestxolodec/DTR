@@ -79,8 +79,9 @@ class Experiment(object):
     def write_to_file(self):
         save_fname = "{}_{}_rep".format(self.scenario, self.n_repeats)
         save_path = os.path.join(self.save_prefix, save_fname)
-        logger.warning("Writing raw results to {}  .......".format(save_path))
-        np.save(save_path, self.results)
+        np_save_path = save_path + ".npy"
+        logger.warning("Writing raw results to {}  .......".format(np_save_path))
+        np.save(np_save_path, self.results)
         logger.warning("Success")
         df = pd.DataFrame.from_records(generate_tuples(self.results, self.n_train_list,
                                                        100 * self.s_factors_percs, self.scenario))
