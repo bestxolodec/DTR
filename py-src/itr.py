@@ -90,7 +90,7 @@ class GP_wrapper(object):
         if self.fit_params.get("standardize_Y", True):
             logging.debug("Y_scaling is on")
             means = self.y_scaler.inverse_transform(means)
-            variances /= self.y_scaler.data_range ** 2
+            variances *= self.y_scaler.data_range ** 2
         return means, variances
 
 

@@ -66,11 +66,10 @@ class Experiment(object):
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
             for k in range(self.n_repeats):
-                ko_train = self.get_data(n_train, self.n_cov, 777+k)
-                ko_test = self.get_data(self.n_test, self.n_cov, 777+k)
-                # fit_params = {"verbose": False, "n_restarts": 1, "normalize": True, "standardize_Y": False}
+                train = self.get_data(n_train, self.n_cov, 777+k)
+                test = self.get_data(self.n_test, self.n_cov, 777+k)
                 # returns (A, V, model); we save only Values
-                data[i, :, k] = fit_and_predict(ko_train, ko_test, self.granularity, self.s_factors,
+                data[i, :, k] = fit_and_predict(train, test, self.granularity, self.s_factors,
                                                 self.pred_value_func, self.fit_params)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
@@ -83,7 +82,7 @@ class Experiment(object):
 
 
     def write_to_file(self):
-        save_fname = "{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
+        save_fname = "{}_reps-{}_rests-{}_norm-{}_Xstand-{}_Ystand-{}".format(
             self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
             self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
         save_path = os.path.join(self.save_prefix, save_fname)
@@ -102,7 +101,7 @@ class Experiment(object):
 
 
 def parse_fit_params_arg(s):
-    fit_params= {}
+    fit_params = {}
     for kv in s.strip().split(","):
         k, v = kv.strip().split(":")
         if "true" in v.lower():
