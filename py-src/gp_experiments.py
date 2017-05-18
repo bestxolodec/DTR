@@ -64,7 +64,7 @@ class Experiment(object):
 
         if "chen" not in self.scenario.lower() and "owl" in self.algo.lower():
             wrapper = ro.globalenv["ChangeFormatFromOurToChenEnriched"]
-            get_data = lambda n_samples, seed: wrapper(get_data(n_samples, seed))
+            return lambda n_samples, seed: wrapper(get_data(n_samples, seed))
         return get_data
 
     def _make_fun_fit_and_predict_by_algo(self):
