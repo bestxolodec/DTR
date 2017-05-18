@@ -47,23 +47,18 @@ class Experiment(object):
         self.n_train_list = exp_params["n_train_list"]
         self.n_test = exp_params["n_test"]
         assert len(self.n_train_list) > 0
-
         self.pred_value_func = ro.globalenv["PredValueGeneral"]
         self.results = None
         self.fit_params = exp_params["fit_params"]
         self.scenario = exp_params["scenario"]
-        self.get_data = self._make_fun_gen_data_by_scenario()
-        # should be the last line in __init__
-        self.fit_and_predict = self._make_fun_fit_and_predict_by_algo()
 
-    @staticmethod
-    def _make_fun_gen_data_by_scenario(scenario):
-        if "chen1" in scenario.lower(): return ro.globalenv["Scenario1Enriched"]
-        elif "chen2" in scenario.lower(): return ro.globalenv["Scenario2Enriched"]
-        elif "chen4" in scenario.lower(): return ro.globalenv["Scenario4Enriched"]
-        elif "shvechikov1" in scenario.lower(): return ro.globalenv['GetDataForShvechikov.1']
-        elif "shvechikov2" in scenario.lower(): return ro.globalenv['GetDataForShvechikov.2']
-        else: raise "Unknown scenario: " + str(scenario)
+    def _make_fun_gen_data_by_scenario(self):
+        if "chen1" in self.scenario.lower(): return ro.globalenv["Scenario1Enriched"]
+        elif "chen2" in self.scenario.lower(): return ro.globalenv["Scenario2Enriched"]
+        elif "chen4" in self.scenario.lower(): return ro.globalenv["Scenario4Enriched"]
+        elif "shvechikov1" in self.scenario.lower(): return ro.globalenv['GetDataForShvechikov.1']
+        elif "shvechikov2" in self.scenario.lower(): return ro.globalenv['GetDataForShvechikov.2']
+        else: raise "Unknown scenario: " + str(self.scenario)
 
     def _make_fun_fit_and_predict_by_algo(self):
         if "lcsl" in self.algo.lower():
@@ -75,13 +70,15 @@ class Experiment(object):
 
     def run(self):
         data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
+        get_data = self._make_fun_gen_data_by_scenario(self.scenario)
+        fit_and_predict = self._make_fun_fit_and_predict_by_algo()
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
             for k in range(self.n_repeats):
-                train = self.get_data(n_train, 777 + k)   # n_of_samples, seed
-                test = self.get_data(self.n_test, 777 + k)   # n_of_samples, seed
+                train = get_data(n_train, 777 + k)   # n_of_samples, seed
+                test = get_data(self.n_test, 777 + k)   # n_of_samples, seed
                 # returns (A, V, ...); we save only Values
-                data[i, :, k] = self.fit_and_predict(train, test)[1]
+                data[i, :, k] = fit_and_predict(train, test)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
