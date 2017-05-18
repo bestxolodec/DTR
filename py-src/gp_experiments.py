@@ -53,25 +53,33 @@ class Experiment(object):
         self.results = None
         self.save_prefix = exp_params["save_prefix"]
 
-    def _make_fun_gen_data_by_scenario(self):
-        if "chen1" in self.scenario.lower(): return ro.globalenv["Scenario1Enriched"]
-        elif "chen2" in self.scenario.lower(): return ro.globalenv["Scenario2Enriched"]
-        elif "chen4" in self.scenario.lower(): return ro.globalenv["Scenario4Enriched"]
-        elif "shvechikov1" in self.scenario.lower(): return ro.globalenv['GetDataForShvechikov.1']
-        elif "shvechikov2" in self.scenario.lower(): return ro.globalenv['GetDataForShvechikov.2']
+    def _make_fun_gen_data_by_scenario_and_algo(self):
+
+        if "chen1" in self.scenario.lower():  gen_data = ro.globalenv["Scenario1Enriched"]
+        elif "chen2" in self.scenario.lower():  get_data = ro.globalenv["Scenario2Enriched"]
+        elif "chen4" in self.scenario.lower():  get_data = ro.globalenv["Scenario4Enriched"]
+        elif "shvechikov1" in self.scenario.lower():  get_data = ro.globalenv['GetDataForShvechikov.1']
+        elif "shvechikov2" in self.scenario.lower():  get_data = ro.globalenv['GetDataForShvechikov.2']
         else: raise "Unknown scenario: " + str(self.scenario)
+
+        if "chen" not in self.scenario.lower() and "owl" in self.algo.lower():
+            wrapper = ro.globalenv["ChangeFormatFromOurToChenEnriched"]
+            get_data = lambda n_samples, seed: wrapper(get_data(n_samples, seed))
+        return get_data
 
     def _make_fun_fit_and_predict_by_algo(self):
         if "lcsl" in self.algo.lower():
             return lambda train, test: fit_and_predict(train, test, self.granularity, self.s_factors,
                                                        self.pred_value_func, self.fit_params)
         if "owl" in self.algo.lower():
+
+            self.s_factors = [0]  # s_factors is meaningless for owl
             fun = ro.globalenv['GetKOLearningValueAndPredictedDose']
             return lambda train, test: [np.array(i) for i in fun(train, test)]
 
     def run(self):
-        data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
-        get_data = self._make_fun_gen_data_by_scenario()
+        data = np.zeros((len(self.n_train_list), len(self.s_factors), self.n_repeats))
+        get_data = self._make_fun_gen_data_by_scenario_and_algo()
         fit_and_predict = self._make_fun_fit_and_predict_by_algo()
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
