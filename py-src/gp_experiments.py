@@ -48,9 +48,10 @@ class Experiment(object):
         self.n_test = exp_params["n_test"]
         assert len(self.n_train_list) > 0
         self.pred_value_func = ro.globalenv["PredValueGeneral"]
-        self.results = None
         self.fit_params = exp_params["fit_params"]
         self.scenario = exp_params["scenario"]
+        self.results = None
+        self.save_prefix = exp_params["save_prefix"]
 
     def _make_fun_gen_data_by_scenario(self):
         if "chen1" in self.scenario.lower(): return ro.globalenv["Scenario1Enriched"]
