@@ -70,7 +70,7 @@ class Experiment(object):
 
     def run(self):
         data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
-        get_data = self._make_fun_gen_data_by_scenario(self.scenario)
+        get_data = self._make_fun_gen_data_by_scenario()
         fit_and_predict = self._make_fun_fit_and_predict_by_algo()
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
