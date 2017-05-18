@@ -2,6 +2,9 @@
 #source("~/yandexDisk/DIPLOMA//OWL/O_learning_functions.r")
 
 library("truncnorm")
+library(devtools)
+load_all('./SVMW/')
+library(SVMW)  
 
 rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
   if (length(n) > 1)
@@ -150,6 +153,7 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
   index = with(train, which(R > quantile(R,q)))
   model = with(train, svm(x = X[index,], y = A[index], w=weight[index],
                           type="eps-regression", epsilon = 0.15, scale=FALSE))
+  return(model)
   return(pred_ko(model,test))
 }
 

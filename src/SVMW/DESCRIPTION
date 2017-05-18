@@ -1,0 +1,27 @@
+Package: SVMW
+Version: 0.2
+Date: 2015-10-02
+Title: SVM with weights for Guanhua Chen
+Suggests: SparseM, Matrix, MASS
+Authors@R: c(person(given = "David", family = "Meyer", role = c("aut", "cre"), email = "David.Meyer@R-project.org"),
+             person(given = "Evgenia", family = "Dimitriadou", role = c("aut","cph")),
+             person(given = "Kurt", family = "Hornik", role = "aut"),
+             person(given = "Andreas", family = "Weingessel", role = "aut"),
+             person(given = "Friedrich", family = "Leisch", role = "aut"),
+             person(given = "Chih-Chung", family = "Chang", role = c("ctb","cph"), comment = "libsvm C++-code"),
+             person(given = "Chih-Chen", family = "Lin", role = c("ctb","cph"), comment = "libsvm C++-code"))
+Description: Functions for support vector machines adapted from package e1071.
+License: GPL-2
+LazyLoad: yes
+Author: David Meyer [aut, cre],
+  Evgenia Dimitriadou [aut, cph],
+  Kurt Hornik [aut],
+  Andreas Weingessel [aut],
+  Friedrich Leisch [aut],
+  Chih-Chung Chang [ctb, cph] (libsvm C++-code),
+  Chih-Chen Lin [ctb, cph] (libsvm C++-code)
+Maintainer: David Meyer <David.Meyer@R-project.org>
+NeedsCompilation: yes
+Repository: CRAN
+Date/Publication: 2014-09-01 20:34:56
+Packaged: 2015-10-02 20:54:16 UTC; sthollow

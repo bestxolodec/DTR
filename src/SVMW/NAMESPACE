@@ -1,0 +1,24 @@
+useDynLib(SVMW)
+
+import(stats)
+
+export(svm, write.svm, tune, tune.control)
+
+exportPattern("tune\\..+", "best\\..+")
+
+S3method(summary, svm)
+S3method(summary, tune)
+
+S3method(plot, svm)
+S3method(plot, tune)
+
+S3method(predict, svm)
+
+S3method(print, svm)
+S3method(print, summary.svm)
+S3method(print, tune)
+S3method(print, summary.tune)
+
+S3method(svm, default)
+S3method(svm, formula)
+
