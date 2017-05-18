@@ -38,7 +38,8 @@ def generate_tuples(d, flables, slabels, sc):
 class Experiment(object):
 
     def __init__(self, exp_params):
-        self.n_cov = 10
+        # self.n_cov = 10
+        self.algo = exp_params["algorithm"]
         self.s_factors_percs = exp_params["s_factors_percs"]
         self.s_factors = sp.stats.norm.ppf(self.s_factors_percs)  # 50 factors evenly splitted
         self.n_repeats = exp_params["n_repeats"]
@@ -46,45 +47,55 @@ class Experiment(object):
         self.n_train_list = exp_params["n_train_list"]
         self.n_test = exp_params["n_test"]
         assert len(self.n_train_list) > 0
-        self.scenario = exp_params["scenario"]
-        if "chen1" in self.scenario.lower():
-            self.get_data = ro.globalenv["Scenario1Enriched"]
-            self.n_cov = 30
-        elif "chen2" in self.scenario.lower():
-            self.get_data = ro.globalenv["Scenario2Enriched"]
-        elif "chen4" in self.scenario.lower():
-            self.get_data = ro.globalenv["Scenario4Enriched"]
-        else:
-            raise "Uknown scenario: " + str(self.scenario)
-        self.save_prefix = exp_params["save_prefix"]
+
         self.pred_value_func = ro.globalenv["PredValueGeneral"]
         self.results = None
         self.fit_params = exp_params["fit_params"]
+        self.scenario = exp_params["scenario"]
+        self.get_data = self._make_fun_gen_data_by_scenario()
+        # should be the last line in __init__
+        self.fit_and_predict = self._make_fun_fit_and_predict_by_algo()
+
+    @staticmethod
+    def _make_fun_gen_data_by_scenario(scenario):
+        if "chen1" in scenario.lower(): return ro.globalenv["Scenario1Enriched"]
+        elif "chen2" in scenario.lower(): return ro.globalenv["Scenario2Enriched"]
+        elif "chen4" in scenario.lower(): return ro.globalenv["Scenario4Enriched"]
+        elif "shvechikov1" in scenario.lower(): return ro.globalenv['GetDataForShvechikov.1']
+        elif "shvechikov2" in scenario.lower(): return ro.globalenv['GetDataForShvechikov.2']
+        else: raise "Unknown scenario: " + str(scenario)
+
+    def _make_fun_fit_and_predict_by_algo(self):
+        if "lcsl" in self.algo.lower():
+            return lambda train, test: fit_and_predict(train, test, self.granularity, self.s_factors,
+                                                       self.pred_value_func, self.fit_params)
+        if "owl" in self.algo.lower():
+            fun = ro.globalenv['GetKOLearningValueAndPredictedDose']
+            return lambda train, test: [np.array(i) for i in fun(train, test)]
 
     def run(self):
         data = np.zeros((len(self.n_train_list), self.s_factors.size, self.n_repeats))
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
             for k in range(self.n_repeats):
-                train = self.get_data(n_train, self.n_cov, 777+k)
-                test = self.get_data(self.n_test, self.n_cov, 777+k)
-                # returns (A, V, model); we save only Values
-                data[i, :, k] = fit_and_predict(train, test, self.granularity, self.s_factors,
-                                                self.pred_value_func, self.fit_params)[1]
+                train = self.get_data(n_train, 777 + k)   # n_of_samples, seed
+                test = self.get_data(self.n_test, 777 + k)   # n_of_samples, seed
+                # returns (A, V, ...); we save only Values
+                data[i, :, k] = self.fit_and_predict(train, test)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
 
     def make_fname(self):
-        return "{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
+        return "algo{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
             self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
             self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
 
 
     def write_to_file(self):
-        save_fname = "{}_reps-{}_rests-{}_norm-{}_Xstand-{}_Ystand-{}".format(
-            self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
-            self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
+        save_fname = "algo-{}_{}_reps-{}_rests-{}_norm-{}_Xstand-{}_Ystand-{}".format(
+            self.algo, self.scenario, self.n_repeats, self.fit_params["n_restarts"],
+            self.fit_params["normalize"], self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
         save_path = os.path.join(self.save_prefix, save_fname)
         # np_save_path = save_path + ".npy"
         # logger.warning("Writing raw results to {}  .......".format(np_save_path))
@@ -127,6 +138,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_test", type=int, default=1000, help="number of samples in test data")
     parser.add_argument("--save_prefix", type=str, default="/home/nbuser/DTR/",
                         help="default path to save simulation results")
+    parser.add_argument("--algorithm", type=str, default="LCSL",
+                        help="algorithm to make predictions: one of OWL, LCSL")
     parser.add_argument("--s_factors_percs", type=float, nargs="+", default=np.arange(.5, 1, .01),
                         help="which percentiles to consider for variance penalty")
     parser.add_argument("--fit_params", type=str, default="",

@@ -41,13 +41,15 @@ Shvechikov.1.fopt <- function(x) {
 }
 
 
-GetDataForShvechikov.1 <- function(sample.size,  sd, min.A=0, max.A=1, min.X=0, max.X=1){
+
+GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.05, min.A=0, max.A=1, min.X=0, max.X=1){
   GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.1.fopt(covars)
     }
     return (-(given.A - optimal.A) ** 2)
   }
+  set.seed(seed)
   X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=3, rate=7.3), min.X, max.X)
   A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=3, rate=7.3), min.A, max.A)
   A.opt <- Shvechikov.1.fopt(X)
@@ -67,7 +69,7 @@ Shvechikov.2.fopt <- function(x) {
   x = x * 100  # initially function was written to support x from 0 to 100, not from 0 to 1
   step.start = 15
   breakage.start = 40
-  first.part <- x**2  *  exp(- x**(.8)) +  (x - step.start) / 50 + .5
+  first.part <- x**2 * exp(-x**(.8)) +  (x - step.start) / 50 + .5
   first.and.changed.part <- ( - x**1.9 / 900 + 6 *  sin(x/6) + 1.5 * (sin(x**1.01 ) + 1) * x**(1/7) )* 1/20
   second.part <-  (- first.part + first.and.changed.part) * (x > breakage.start)
   whole <- first.part + second.part
@@ -79,17 +81,18 @@ Shvechikov.2.fopt <- function(x) {
 }
 
 
-GetDataForShvechikov.2 <- function(sample.size, sd, min.A=0, max.A=1, min.X=0, max.X=100) {
+GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.05, min.A=0, max.A=1, min.X=0, max.X=100) {
   GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.2.fopt(covars)
     }
     return (-(given.A - optimal.A) ** 2)
   }
+  set.seed(seed)
   X <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=13, rate=0.3), min.X, max.X)
   X <- X / 100 # hack to bring X in [0,1] range
   A <- ReplaceExtremeWithUnif(rgamma(n=sample.size,  shape=2, rate=4.21), min.A, max.A)
-  A.opt <-  Shvechikov.2.fopt(X)
+  A.opt <- Shvechikov.2.fopt(X)
   Q.vals <-GetQFunctionValues(X, A, A.opt)
   R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
   data <- list(covariates = X, treatment=A, optimal.treatment=A.opt,
@@ -154,7 +157,7 @@ GetKOLearningValueAndPredictedDose <- function(train, test, q = 0.6) {
 
 # Scenarios from Chen, 2016 -----------------------------------------------
 
-Scenario1Enriched <- function(size,ncov,seed){
+Scenario1Enriched <- function(size, seed, ncov=30){
   GetOptimalTreatment <- function(X) {
     1 + 0.5*X[,2] + 0.5*X[,1]
   }
@@ -175,7 +178,7 @@ Scenario1Enriched <- function(size,ncov,seed){
 
 
 
-Scenario2Enriched <- function(size,ncov,seed){
+Scenario2Enriched <- function(size, seed, ncov=10){
   GetOptimalTreatment <- function(X) {
     I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) +
       X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
@@ -187,7 +190,7 @@ Scenario2Enriched <- function(size,ncov,seed){
   GetQFunctionValues <- function(X, A, A_opt=D_opt) {
     8 + 4*cos(2*pi*X[,2]) - 2*X[,4] - 8*X[,5]^3 - 15*abs(D_opt-A)
   }
-  mu =   GetQFunctionValues(X, A)
+  mu = GetQFunctionValues(X, A)
   R = rnorm(length(mu),mu,1)
   datainfo = list(X=X, A=A, R=R, D_opt=D_opt, mu=mu,
                   GetQFunctionValues=GetQFunctionValues,
@@ -196,13 +199,13 @@ Scenario2Enriched <- function(size,ncov,seed){
 }
 
 
-Scenario4Enriched <- function(size,ncov,seed){
-  set.seed(seed)
-  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
-  GetOptimalTreatment <-function(X) {
+Scenario4Enriched <- function(size, seed, ncov=10){
+  GetOptimalTreatment <- function(X) {
     I(X[,1] > -0.5)*I(X[,1] < 0.5)*0.6 + 1.2*I(X[,1] > 0.5) + 1.2*I(X[,1] < -0.5) +
       X[,4]^2 + 0.5*log(abs(X[,7])+1) - 0.6
   }
+  set.seed(seed)
+  X = matrix(runif(size*ncov,-1,1),ncol=ncov)
   D_opt = GetOptimalTreatment(X)
   A = rtruncnorm(size,a=0,b=2,mean=D_opt,sd=0.5)
   GetQFunctionValues <- function(X, A, A_opt=D_opt) {
