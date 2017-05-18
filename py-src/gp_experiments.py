@@ -84,8 +84,8 @@ class Experiment(object):
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
             for k in range(self.n_repeats):
-                train = get_data(n_train, 777 + k)   # n_of_samples, seed
-                test = get_data(self.n_test, 777 + k)   # n_of_samples, seed
+                train = get_data(n_train, 7777 + k)   # n_of_samples, seed
+                test = get_data(self.n_test, 7777 + k)   # n_of_samples, seed
                 # returns (A, V, ...); we save only Values
                 data[i, :, k] = fit_and_predict(train, test)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
