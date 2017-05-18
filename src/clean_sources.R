@@ -3,7 +3,9 @@
 
 library("truncnorm")
 library(devtools)
-load_all('./SVMW/')
+
+dirname <- dirname(sys.frame(1)$ofile)
+load_all(file.path(dirname, "SVMW"))
 library(SVMW)  
 
 rtruncnorm <- function (n, a = -Inf, b = Inf, mean = 0, sd = 1)  {
