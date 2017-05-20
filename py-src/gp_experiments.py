@@ -40,6 +40,7 @@ class Experiment(object):
     def __init__(self, exp_params):
         # self.n_cov = 10
         self.algo = exp_params["algorithm"]
+        self.scenario = exp_params["scenario"]
         self.s_factors_percs = exp_params["s_factors_percs"]
         self.s_factors = sp.stats.norm.ppf(self.s_factors_percs)  # 50 factors evenly splitted
         self.n_repeats = exp_params["n_repeats"]
@@ -49,20 +50,20 @@ class Experiment(object):
         assert len(self.n_train_list) > 0
         self.pred_value_func = ro.globalenv["PredValueGeneral"]
         self.fit_params = exp_params["fit_params"]
-        self.scenario = exp_params["scenario"]
         self.results = None
         self.save_prefix = exp_params["save_prefix"]
+        self.get_data = self._make_gen_data_fun()
+        self.fit_and_predict = self._make_fit_and_predict_fun()
 
-    def _make_fun_gen_data_by_scenario_and_algo(self):
-
-        if "chen1" in self.scenario.lower():  gen_data = ro.globalenv["Scenario1Enriched"]
-        elif "chen2" in self.scenario.lower():  get_data = ro.globalenv["Scenario2Enriched"]
-        elif "chen4" in self.scenario.lower():  get_data = ro.globalenv["Scenario4Enriched"]
-        elif "shvechikov1" in self.scenario.lower():  get_data = ro.globalenv['GetDataForShvechikov.1']
-        elif "shvechikov2" in self.scenario.lower():  get_data = ro.globalenv['GetDataForShvechikov.2']
-        else: raise "Unknown scenario: " + str(self.scenario)
-
-        if "chen" not in self.scenario.lower() and "owl" in self.algo.lower():
+    def _make_gen_data_fun(self):
+        scenario, algo = self.scenario.lower(), self.algo.lower()
+        if "chen1" in scenario:  get_data = ro.globalenv["Scenario1Enriched"]
+        elif "chen2" in scenario:  get_data = ro.globalenv["Scenario2Enriched"]
+        elif "chen4" in scenario:  get_data = ro.globalenv["Scenario4Enriched"]
+        elif "shvechikov1" in scenario:  get_data = ro.globalenv['GetDataForShvechikov.1']
+        elif "shvechikov2" in scenario:  get_data = ro.globalenv['GetDataForShvechikov.2']
+        else: raise "Unknown scenario: " + str(scenario)
+        if "chen" not in scenario and "owl" in algo:
             wrapper = ro.globalenv["ChangeFormatFromOurToChenEnriched"]
             return lambda n_samples, seed: wrapper(get_data(n_samples, seed))
         return get_data
@@ -71,32 +72,26 @@ class Experiment(object):
         if "lcsl" in self.algo.lower():
             return lambda train, test: fit_and_predict(train, test, self.granularity, self.s_factors,
                                                        self.pred_value_func, self.fit_params)
-        if "owl" in self.algo.lower():
-
-            self.s_factors = [0]  # s_factors is meaningless for owl
+        elif "owl" in self.algo.lower():
+            self.s_factors_percs = self.s_factors = [0]  # s_factors is meaningless for owl
             fun = ro.globalenv['GetKOLearningValueAndPredictedDose']
             return lambda train, test: [np.array(i) for i in fun(train, test)]
+        else:
+            raise "Unknown algorithm: " + str(self.algo)
+
 
     def run(self):
         data = np.zeros((len(self.n_train_list), len(self.s_factors), self.n_repeats))
-        get_data = self._make_fun_gen_data_by_scenario_and_algo()
-        fit_and_predict = self._make_fun_fit_and_predict_by_algo()
         for i, n_train in enumerate(self.n_train_list):
             start = timer()
             for k in range(self.n_repeats):
-                train = get_data(n_train, 7777 + k)   # n_of_samples, seed
-                test = get_data(self.n_test, 7777 + k)   # n_of_samples, seed
+                train = self.get_data(n_train, 7777 + k)   # n_of_samples, seed
+                test = self.get_data(self.n_test, 7777 + k)   # n_of_samples, seed
                 # returns (A, V, ...); we save only Values
-                data[i, :, k] = fit_and_predict(train, test)[1]
+                data[i, :, k] = self.fit_and_predict(train, test)[1]
             logging.warning("{}\telapsed {:.2f} min".format(n_train, (timer() - start) / 60))
         self.results = data
         return self
-
-    def make_fname(self):
-        return "algo{}_reps{}_rests{}_norm{}_Xstand{}_Ystand{}".format(
-            self.scenario, self.n_repeats, self.fit_params["n_restarts"], self.fit_params["normalize"],
-            self.fit_params["standardize_X"], self.fit_params["standardize_Y"])
-
 
     def write_to_file(self):
         save_fname = "algo-{}_{}_reps-{}_rests-{}_norm-{}_Xstand-{}_Ystand-{}".format(
@@ -131,7 +126,7 @@ def parse_fit_params_arg(s):
     return fit_params
 
 
-if __name__ == "__main__":
+if __name__ == "__main__"
     import argparse
     parser = argparse.ArgumentParser(description="Experimets with GP",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)

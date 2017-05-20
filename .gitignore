@@ -1,4 +1,4 @@
-*.pdf
+gi*.pdf
 *.aux
 *.log
 *.synctex.gz
@@ -14,3 +14,4 @@ DIPLOMA.Rproj
 .RDataTmp
 .idea
 __pycache__
+*.pyc

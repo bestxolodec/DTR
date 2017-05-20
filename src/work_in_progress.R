@@ -1337,3 +1337,20 @@ hist(o - 1)
 
 
 mean(o)
+
+
+
+
+
+
+
+
+
+
+
+
+train = Scenario1Enriched(100, 0)
+test = Scenario1Enriched(100, 0)
+GetKOLearningValueAndPredictedDose(train, test)
+
+
