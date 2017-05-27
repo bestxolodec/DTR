@@ -79,7 +79,6 @@ class Experiment(object):
         else:
             raise "Unknown algorithm: " + str(self.algo)
 
-
     def run(self):
         data = np.zeros((len(self.n_train_list), len(self.s_factors), self.n_repeats))
         for i, n_train in enumerate(self.n_train_list):
@@ -126,7 +125,7 @@ def parse_fit_params_arg(s):
     return fit_params
 
 
-if __name__ == "__main__"
+if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Experimets with GP",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
