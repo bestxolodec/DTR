@@ -44,8 +44,7 @@ Shvechikov.1.fopt <- function(x)  {
   return (((x - .5) / .5 ) ** 2)
 }
 
-
-GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.05){
+GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.1){
   GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.1.fopt(covars)
@@ -56,7 +55,7 @@ GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.05){
   X = matrix(runif(sample.size,0,1))
   A = runif(sample.size, 0, 1)
   A.opt <- Shvechikov.1.fopt(X)
-  Q.vals <-GetQFunctionValues(X, A, A.opt)
+  Q.vals <- GetQFunctionValues(X, A, A.opt)
   R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
   data <- list(covariates = X, treatment=A, optimal.treatment=A.opt,
                prop.scores = rep(1, sample.size))
@@ -67,6 +66,11 @@ GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.05){
   return (data)
 }
 
+# o <- GetDataForShvechikov.1(10000, 0, 0.1)
+# with(o, {
+#   plot(covariates, treatment, col=rgb(0,reward / max(reward),0, 0.5), pch=19)
+# })
+
 
 Shvechikov.2.fopt <- function(x) {
   f <- function(x) { # scaled Runge function
@@ -74,11 +78,11 @@ Shvechikov.2.fopt <- function(x) {
     cos(3 * pi * x_alt) / (1 + 25 * (x_alt - 0.25) ** 2)
   }
   s <-   0.1 * x * (10 + sin(x * 20) + sin(x * 50) )  - 1.3
-  return (f(x) + s * (x > 0.5))
+  fopt <- f(x) + s * (x > 0.5) 
+  return (fopt / 1.5  + 0.7)
 }
 
-
-GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.05, min.A=0, max.A=1, min.X=0, max.X=100) {
+GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.01) {
   GetQFunctionValues <- function(covars, given.A, optimal.A=NULL) {
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.2.fopt(covars)
@@ -89,7 +93,7 @@ GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.05, min.A=0, max.A=1,
   X = runif(sample.size, 0, 1)
   A = runif(sample.size, 0, 1)
   A.opt <- Shvechikov.2.fopt(X)
-  Q.vals <-GetQFunctionValues(X, A, A.opt)
+  Q.vals <- GetQFunctionValues(X, A, A.opt)
   R.list <- GetRewardGivenQfunctionValuesAsMeanVec(Q.vals, sd = sd)
   data <- list(covariates = X, treatment=A, optimal.treatment=A.opt,
                prop.scores = rep(1, sample.size))
@@ -99,6 +103,15 @@ GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.05, min.A=0, max.A=1,
   data$GetOptimalTreatment <- Shvechikov.2.fopt
   return (data)
 }
+
+
+# max(o$reward)
+# o <- GetDataForShvechikov.2(10000, 0, 0.01)
+# with(o, {
+#   plot(covariates, treatment, col=rgb(0,reward / max(reward),0, 0.5), pch=19)
+# })
+# curve(Shvechikov.2.fopt)
+
 
 
 Shvechikov.3.fopt <- function(x) {
