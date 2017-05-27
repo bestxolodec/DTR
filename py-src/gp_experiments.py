@@ -68,7 +68,7 @@ class Experiment(object):
             return lambda n_samples, seed: wrapper(get_data(n_samples, seed))
         return get_data
 
-    def _make_fun_fit_and_predict_by_algo(self):
+    def _make_fit_and_predict_fun(self):
         if "lcsl" in self.algo.lower():
             return lambda train, test: fit_and_predict(train, test, self.granularity, self.s_factors,
                                                        self.pred_value_func, self.fit_params)
