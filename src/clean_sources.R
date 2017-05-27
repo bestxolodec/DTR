@@ -49,7 +49,7 @@ GetDataForShvechikov.1 <- function(sample.size, seed, sd=0.1){
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.1.fopt(covars)
     }
-    return (-(given.A - optimal.A) ** 2) * 10
+    return (-(given.A - optimal.A) ** 2)
   }
   set.seed(seed)
   X = matrix(runif(sample.size,0,1))
@@ -87,7 +87,7 @@ GetDataForShvechikov.2 <- function(sample.size, seed, sd=0.01) {
     if (is.null(optimal.A)) {
       optimal.A <- Shvechikov.2.fopt(covars)
     }
-    return (-(given.A - optimal.A) ** 2) * 10 
+    return (- 10 * (given.A - optimal.A) ** 2)
   }
   set.seed(seed)
   X = runif(sample.size, 0, 1)
